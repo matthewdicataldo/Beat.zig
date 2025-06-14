@@ -1,0 +1,30 @@
+# Build artifacts
+*.o
+*.exe
+*.pdb
+*.lib
+*.a
+*.so
+*.dylib
+
+# Zig build cache
+.zig-cache/
+.zig-out/
+
+# Editor files
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Compiled binaries
+benchmark_ultra
+benchmark_v2_overhead
+zigpulse_unified_example
+benchmark
+examples
+demo
