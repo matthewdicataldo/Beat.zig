@@ -60,6 +60,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    // Export modules for external use
+    _ = b.addModule("beat", .{
+        .root_source_file = b.path("beat.zig"),  // Use the bundle file
+    });
+    
     const zigpulse_module = b.addModule("zigpulse", .{
         .root_source_file = b.path("src/core.zig"),
     });
