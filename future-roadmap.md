@@ -15,9 +15,32 @@ ZigPulse aims to become the premier parallelism library for Zig, offering best-i
   - Integration with existing heartbeat scheduler
 - **Expected Impact**: 20-30% reduction in scheduling overhead
 
-### Continuation Stealing (TODO RESEARCH AND FILL OUT)
-- https://dpiponi.github.io/cont.html
-- https://wiki.haskell.org/Continuation
+### Continuation Stealing 🔄
+- **Goal**: More efficient work-stealing with superior memory characteristics vs child stealing
+- **Background**: 
+  - Continuation stealing (used in Cilk) vs child stealing (used in TBB, OpenMP, TPL)
+  - In continuation stealing, the continuation after a spawned task is made available for theft
+  - Child stealing makes spawned child tasks available for theft instead
+- **Key Advantages**:
+  - **Memory Efficiency**: Stack allocation for continuations vs dynamic allocation for child tasks
+  - **Reduced Stack Switches**: No stack switch needed when continuation isn't stolen (common case)
+  - **Bounded Space**: O(P) space complexity vs potentially unbounded in child stealing
+  - **Better Cache Locality**: Preserves serial execution order when no theft occurs
+- **Implementation Challenges**:
+  - Requires compiler support for continuation capture
+  - Complex stack frame management 
+  - Integration with Zig's execution model
+  - Handling of error propagation across stolen continuations
+- **Technical Approach**:
+  - Extend current Chase-Lev deque to store continuations instead of tasks
+  - Implement continuation capture mechanism in Zig
+  - Stack-allocated continuation frames with proper lifetime management
+  - Synchronization via join counters for spawned work completion
+- **Expected Impact**: 15-25% reduction in scheduling overhead vs current child-stealing approach
+- **Research Sources**:
+  - Cilk work-stealing implementation papers
+  - Intel Cilk Plus runtime analysis
+  - Comparative studies of continuation vs child stealing performance
 
 ### GPU Task Offloading via SYCL 🎮
 - **Goal**: Transparent GPU acceleration for suitable workloads
@@ -90,26 +113,3 @@ ZigPulse aims to become the premier parallelism library for Zig, offering best-i
 - Hazard pointer optimizations
 - Memory reclamation strategies
 - Cache-oblivious algorithms
-
-## Areas we're deferring exploration (For now)
-
-### Distributed Work Stealing 🌐
-- **Goal**: Scale beyond single-machine boundaries
-- **Implementation**:
-  - Network-transparent task serialization
-  - Distributed work-stealing protocol
-  - Fault-tolerant task migration
-  - Latency-aware scheduling
-- **Target**: Scale to 100+ nodes
-
-### Quantum-Inspired Algorithms
-- Superposition of task states
-- Quantum annealing for optimization
-- Probabilistic scheduling
-- Quantum-classical hybrid approaches
-
-### Neuromorphic Computing
-- Event-driven task scheduling
-- Spiking neural network integration
-- Asynchronous computation models
-- Brain-inspired parallelism
