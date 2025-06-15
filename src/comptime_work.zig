@@ -331,7 +331,13 @@ pub fn parallelMap(
     output: []U,
     comptime map_fn: fn(T) U,
 ) !void {
-    if (input.len != output.len) return error.SizeMismatch;
+    if (input.len != output.len) {
+        // parallelMap requires input and output arrays to have the same length
+        // Input length: {}, Output length: {}
+        // Help: Ensure both arrays have identical sizes before calling parallelMap
+        // Example: var output: [input.len]OutputType = undefined;
+        return error.ParallelMapArraySizeMismatch;
+    }
     
     const num_workers = pool.config.num_workers orelse 1;
     

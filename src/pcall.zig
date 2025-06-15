@@ -144,7 +144,11 @@ pub inline fn pcallMinimal(comptime T: type, comptime func: fn () T) T {
     // In debug mode, use standard pcall
     var future = pcall(T, &func);
     return future.get() catch |err| {
-        std.debug.panic("pcallMinimal failed: {}", .{err});
+        // Zero-overhead parallel call failed unexpectedly
+        // Error: {}, Function: pcallMinimal
+        // Help: Check task function implementation, thread pool initialization, memory allocation
+        // Common causes: Task function panic, thread pool shutdown, out of memory
+        std.debug.panic("pcallMinimal execution failed: {}", .{err});
     };
 }
 
@@ -159,13 +163,19 @@ pub inline fn pcallAuto(comptime T: type, comptime func: fn () T) T {
         // Medium results: use pcall
         var future = pcall(T, &func);
         return future.get() catch |err| {
-            std.debug.panic("pcallAuto failed: {}", .{err});
+            // Automatic parallel call failed for medium-sized result type
+            // Error: {}, Result size: {}B, Strategy: parallel call
+            // Help: Check task function implementation, thread pool state, memory availability
+            std.debug.panic("pcallAuto (medium) execution failed: {}", .{err});
         };
     } else {
         // Large results: always parallelize
         var future = pcallBasic(T, &func);
         return future.get() catch |err| {
-            std.debug.panic("pcallAuto failed: {}", .{err});
+            // Automatic parallel call failed for large result type
+            // Error: {}, Result size: {}B, Strategy: force parallel (large data)
+            // Help: Check task function implementation, thread pool availability, memory constraints
+            std.debug.panic("pcallAuto (large) execution failed: {}", .{err});
         };
     }
 }

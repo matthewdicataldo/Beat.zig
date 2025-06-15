@@ -295,14 +295,25 @@ pub fn setThreadAffinity(thread: std.Thread, cpus: []const u32) !void {
             const tid: i32 = 0; // 0 means current thread in sched_setaffinity
             
             linux.sched_setaffinity(tid, &cpu_set) catch {
-                return error.AffinityFailed;
+                // Linux thread affinity setting failed
+                // Common causes: Invalid CPU ID, insufficient permissions, CPU offline
+                // Help: Ensure CPUs exist, run with sufficient privileges, or disable affinity
+                // Original error: sched_setaffinity() syscall failed
+                return error.LinuxAffinitySystemCallFailed;
             };
         },
         .windows => {
-            // TODO: SetThreadAffinityMask - will be implemented separately
-            return error.NotImplemented;
+            // Windows thread affinity is not yet implemented
+            // Help: This feature requires SetThreadAffinityMask API integration
+            // Workaround: Use Linux or rely on OS default thread scheduling
+            return error.WindowsAffinityNotImplemented;
         },
-        else => return error.NotSupported,
+        else => {
+            // Thread affinity is not supported on this platform
+            // Supported platforms: Linux (full support), Windows (planned)
+            // This is not an error - the thread pool will work without affinity
+            return error.PlatformAffinityNotAvailable;
+        },
     }
 }
 
@@ -324,14 +335,25 @@ pub fn setCurrentThreadAffinity(cpus: []const u32) !void {
             
             // Use 0 for current thread
             linux.sched_setaffinity(0, &cpu_set) catch {
-                return error.AffinityFailed;
+                // Linux thread affinity setting failed for current thread
+                // Common causes: Invalid CPU ID, insufficient permissions, CPU offline
+                // Help: Ensure CPUs exist, run with sufficient privileges, or disable affinity
+                // Original error: sched_setaffinity() syscall failed
+                return error.LinuxAffinitySystemCallFailed;
             };
         },
         .windows => {
-            // TODO: SetThreadAffinityMask with GetCurrentThread() - will be implemented separately
-            return error.NotImplemented;
+            // Windows thread affinity is not yet implemented  
+            // Help: This feature requires SetThreadAffinityMask API integration
+            // Workaround: Use Linux or rely on OS default thread scheduling
+            return error.WindowsAffinityNotImplemented;
         },
-        else => return error.NotSupported,
+        else => {
+            // Thread affinity is not supported on this platform
+            // Supported platforms: Linux (full support), Windows (planned)
+            // This is not an error - the thread pool will work without affinity
+            return error.PlatformAffinityNotAvailable;
+        },
     }
 }
 

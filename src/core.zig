@@ -82,11 +82,26 @@ pub const TaskStatus = enum(u8) {
     cancelled = 4,
 };
 
+/// Task execution and thread pool errors with descriptive context
 pub const TaskError = error{
+    /// Task function panicked during execution
+    /// Help: Check task function for runtime errors, array bounds, null pointers
     TaskPanicked,
+    
+    /// Task was cancelled before or during execution
+    /// Help: This is normal behavior when shutting down the thread pool
     TaskCancelled,
+    
+    /// Task execution exceeded the configured timeout
+    /// Help: Increase timeout value or optimize task performance
     TaskTimeout,
+    
+    /// Task queue is full, cannot accept new tasks  
+    /// Help: Increase queue size, reduce task submission rate, or add more workers
     QueueFull,
+    
+    /// Thread pool is shutting down, no new tasks accepted
+    /// Help: Do not submit tasks after calling pool.deinit() or during shutdown
     PoolShutdown,
 };
 

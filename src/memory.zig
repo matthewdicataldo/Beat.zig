@@ -196,8 +196,11 @@ pub fn SlabAllocator(comptime T: type, comptime slab_size: usize) type {
                 slab = s.next;
             }
             
-            // Pointer not found in any slab
-            unreachable;
+            // Slab allocator corruption detected - pointer not found in any allocated slab
+            // This indicates either memory corruption, double-free, or freeing unallocated memory
+            // Help: Check for use-after-free bugs, double-free errors, or incorrect pointer arithmetic
+            // Debug: Enable allocator debugging, check pointer validity before free()
+            std.debug.panic("SlabAllocator.free: invalid pointer not found in any slab", .{});
         }
         
         // Helper function for safe slice containment checking

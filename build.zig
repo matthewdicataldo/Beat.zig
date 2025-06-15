@@ -423,4 +423,16 @@ pub fn build(b: *std.Build) void {
     const run_parallel_work_test = b.addRunArtifact(parallel_work_test);
     const parallel_work_test_step = b.step("test-parallel-work", "Test parallel work distribution runtime implementation");
     parallel_work_test_step.dependOn(&run_parallel_work_test.step);
+    
+    // Enhanced error messages test
+    const enhanced_errors_test = b.addTest(.{
+        .root_source_file = b.path("test_enhanced_errors.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, enhanced_errors_test, auto_config);
+    
+    const run_enhanced_errors_test = b.addRunArtifact(enhanced_errors_test);
+    const enhanced_errors_test_step = b.step("test-errors", "Test enhanced error messages with descriptive context");
+    enhanced_errors_test_step.dependOn(&run_enhanced_errors_test.step);
 }

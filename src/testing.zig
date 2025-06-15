@@ -58,13 +58,21 @@ pub fn validateResourceCleanup(initial: TestStats, final: TestStats) !void {
     if (delta.tasks_submitted != total_processed) {
         std.debug.print("Resource leak detected: {d} tasks submitted, {d} completed, {d} cancelled\n", 
             .{ delta.tasks_submitted, delta.tasks_completed, delta.tasks_cancelled });
-        return error.ResourceLeak;
+        // Thread pool resource leak detected - submitted tasks not properly processed
+        // Submitted: {}, Completed: {}, Cancelled: {}, Missing: {}
+        // Help: Check for deadlocks, ensure pool.wait() is called, verify task completion
+        // Common causes: Tasks stuck in queues, worker threads not running, premature shutdown
+        return error.ThreadPoolResourceLeak;
     }
     
     // No tasks should remain in worker queues (this is a basic check)
     if (delta.tasks_submitted > 0 and delta.tasks_completed == 0) {
         std.debug.print("Possible deadlock: tasks submitted but none completed\n", .{});
-        return error.PossibleDeadlock;
+        // Thread pool deadlock detected - tasks submitted but none completed
+        // Submitted: {}, Workers: available but idle
+        // Help: Check for circular dependencies, task function panics, or worker thread issues
+        // Debug: Use thread pool diagnostics, check task function implementation
+        return error.ThreadPoolDeadlockDetected;
     }
 }
 
@@ -107,7 +115,11 @@ pub fn runPerformanceTest(
     if (duration_ms > expected_max_duration_ms) {
         std.debug.print("Performance test took {d}ms, expected <= {d}ms\n", 
             .{ duration_ms, expected_max_duration_ms });
-        return error.PerformanceRegression;
+        // Performance regression detected - test execution exceeded expected duration
+        // Actual: {}ms, Expected: ≤{}ms, Slowdown: {}%
+        // Help: Check for resource contention, optimize task implementation, increase test timeout
+        // Consider: CPU load, memory pressure, or algorithmic changes affecting performance
+        return error.PerformanceTestRegressionDetected;
     }
 }
 

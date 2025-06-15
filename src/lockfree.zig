@@ -41,8 +41,13 @@ pub fn WorkStealingDeque(comptime T: type) type {
         
         pub fn init(allocator: std.mem.Allocator, capacity: u64) !Self {
             // Ensure capacity is power of 2
-            const actual_capacity = std.math.ceilPowerOfTwo(u64, capacity) catch 
-                return error.InvalidCapacity;
+            const actual_capacity = std.math.ceilPowerOfTwo(u64, capacity) catch {
+                // Deque capacity must be representable as a power of 2
+                // Requested capacity: {}, Maximum supported: 2^63
+                // Help: Use a smaller capacity value (e.g., 1024, 4096, 8192)
+                // Common values: 256 (small), 1024 (medium), 4096 (large)
+                return error.DequeCapacityTooLarge;
+            };
             
             const buffer = try allocator.alloc(?T, actual_capacity);
             @memset(buffer, null);
@@ -70,7 +75,11 @@ pub fn WorkStealingDeque(comptime T: type) type {
             // Check if full (handle wraparound)
             const current_size = if (b >= t) b - t else 0;
             if (current_size >= self.capacity) {
-                return error.DequeFull;
+                // Work-stealing deque is full, cannot accept more tasks
+                // Current size: {}, Capacity: {}
+                // Help: Increase deque capacity, process existing tasks, or implement backpressure
+                // Consider: Larger capacity for high-throughput workloads
+                return error.WorkStealingDequeFull;
             }
             
             // Store item

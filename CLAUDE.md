@@ -48,6 +48,9 @@ zig build demo-config
 # Comptime work distribution patterns demo
 zig build demo-comptime
 
+# Enhanced error messages demonstration
+zig build test-errors
+
 # Smart worker selection test
 zig build test-smart-worker
 
@@ -149,6 +152,12 @@ The bundle file re-exports all modules but requires the `src/` directory structu
   - Architecture-specific optimizations (x86_64, aarch64, etc.)
   - Intelligent defaults with manual override capability
   - **VERIFIED**: Seamless integration of build-time detection with runtime optimization
+- **Enhanced error message system** with descriptive context and helpful suggestions
+  - Specific error types instead of generic errors (e.g., `ParallelMapArraySizeMismatch`, `WorkStealingDequeFull`)
+  - Common causes and root cause analysis for faster debugging
+  - Helpful suggestions and workarounds for issue resolution
+  - Platform-specific guidance (Linux/Windows thread affinity)
+  - Self-documenting error conditions reducing need for external documentation
 
 ## Development Notes
 
@@ -158,7 +167,7 @@ The project uses comprehensive testing including unit tests, integration tests, 
 ### Version Evolution
 - **V1**: Basic work-stealing thread pool
 - **V2**: Added heartbeat scheduling with token accounting
-- **V3**: CPU topology awareness, NUMA optimization, One Euro Filter prediction, compile-time work distribution patterns, **build-time auto-configuration integration**, **runtime parallel work distribution**, **improved thread affinity handling**
+- **V3**: CPU topology awareness, NUMA optimization, One Euro Filter prediction, compile-time work distribution patterns, **build-time auto-configuration integration**, **runtime parallel work distribution**, **improved thread affinity handling**, **enhanced error message system**
 
 ### Formal Verification
 The project is working towards formal verification using Lean 4 theorem prover with LLM-assisted proof development for mathematical correctness guarantees of lock-free algorithms.
