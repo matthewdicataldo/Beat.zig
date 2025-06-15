@@ -12,6 +12,7 @@ pub const coz = @import("coz.zig");
 pub const testing = @import("testing.zig");
 pub const build_opts = @import("build_opts.zig");
 pub const comptime_work = @import("comptime_work.zig");
+pub const fingerprint = @import("fingerprint.zig");
 
 // Version info
 pub const version = std.SemanticVersion{
@@ -110,6 +111,11 @@ pub const Task = struct {
     data: *anyopaque,
     priority: Priority = .normal,
     affinity_hint: ?u32 = null,              // Preferred NUMA node (v3)
+    
+    // Optional fingerprinting support (Phase 2 enhancement)
+    fingerprint_hash: ?u64 = null,           // Cache fingerprint hash for performance
+    creation_timestamp: ?u64 = null,         // Task creation time for temporal analysis
+    data_size_hint: ?usize = null,           // Hint about data size for optimization
 };
 
 // ============================================================================

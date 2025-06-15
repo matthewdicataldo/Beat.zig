@@ -435,4 +435,28 @@ pub fn build(b: *std.Build) void {
     const run_enhanced_errors_test = b.addRunArtifact(enhanced_errors_test);
     const enhanced_errors_test_step = b.step("test-errors", "Test enhanced error messages with descriptive context");
     enhanced_errors_test_step.dependOn(&run_enhanced_errors_test.step);
+    
+    // Task fingerprinting integration test
+    const fingerprint_test = b.addTest(.{
+        .root_source_file = b.path("test_fingerprint_integration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, fingerprint_test, auto_config);
+    
+    const run_fingerprint_test = b.addRunArtifact(fingerprint_test);
+    const fingerprint_test_step = b.step("test-fingerprint", "Test task fingerprinting integration with predictive scheduling");
+    fingerprint_test_step.dependOn(&run_fingerprint_test.step);
+    
+    // Enhanced One Euro Filter implementation test
+    const enhanced_one_euro_test = b.addTest(.{
+        .root_source_file = b.path("test_enhanced_one_euro_filter.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, enhanced_one_euro_test, auto_config);
+    
+    const run_enhanced_one_euro_test = b.addRunArtifact(enhanced_one_euro_test);
+    const enhanced_one_euro_test_step = b.step("test-enhanced-filter", "Test enhanced One Euro Filter implementation replacing simple averaging");
+    enhanced_one_euro_test_step.dependOn(&run_enhanced_one_euro_test.step);
 }
