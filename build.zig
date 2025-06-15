@@ -471,4 +471,16 @@ pub fn build(b: *std.Build) void {
     const run_advanced_tracking_test = b.addRunArtifact(advanced_tracking_test);
     const advanced_tracking_test_step = b.step("test-advanced-tracking", "Test advanced performance tracking with nanosecond precision and velocity tracking");
     advanced_tracking_test_step.dependOn(&run_advanced_tracking_test.step);
+    
+    // Multi-factor confidence model test
+    const multi_factor_confidence_test = b.addTest(.{
+        .root_source_file = b.path("test_multi_factor_confidence.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, multi_factor_confidence_test, auto_config);
+    
+    const run_multi_factor_confidence_test = b.addRunArtifact(multi_factor_confidence_test);
+    const multi_factor_confidence_test_step = b.step("test-multi-factor-confidence", "Test multi-factor confidence model for enhanced scheduling decisions");
+    multi_factor_confidence_test_step.dependOn(&run_multi_factor_confidence_test.step);
 }

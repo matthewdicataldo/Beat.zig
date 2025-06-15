@@ -331,6 +331,132 @@ pub const TaskAnalyzer = struct {
 // Fingerprint Registry for Performance Tracking
 // ============================================================================
 
+/// Multi-factor confidence model for enhanced scheduling decisions (Task 2.3.1)
+pub const MultiFactorConfidence = struct {
+    sample_size_confidence: f32,     // Confidence based on number of samples
+    accuracy_confidence: f32,        // Confidence based on prediction accuracy
+    temporal_confidence: f32,        // Confidence based on temporal relevance
+    variance_confidence: f32,        // Confidence based on variance stability
+    overall_confidence: f32,         // Combined weighted confidence score
+    
+    // Detailed metrics for analysis
+    sample_count: u64,
+    recent_accuracy: f32,
+    time_since_last_ms: f64,
+    coefficient_of_variation: f32,
+    
+    /// Calculate multi-factor confidence from ProfileEntry
+    pub fn calculate(profile: *const FingerprintRegistry.ProfileEntry) MultiFactorConfidence {
+        var result = MultiFactorConfidence{
+            .sample_size_confidence = 0.0,
+            .accuracy_confidence = 0.0,
+            .temporal_confidence = 0.0,
+            .variance_confidence = 0.0,
+            .overall_confidence = 0.0,
+            .sample_count = profile.execution_count,
+            .recent_accuracy = profile.rolling_accuracy,
+            .time_since_last_ms = 0.0,
+            .coefficient_of_variation = 0.0,
+        };
+        
+        if (profile.execution_count == 0) return result;
+        
+        // 1. Sample Size Confidence: Asymptotic curve (0 -> 1 as samples increase)
+        // Uses exponential approach to asymptote: 1 - e^(-samples/scale)
+        const sample_scale = 25.0; // Scale factor for sample size confidence
+        result.sample_size_confidence = 1.0 - @exp(-@as(f32, @floatFromInt(profile.execution_count)) / sample_scale);
+        
+        // 2. Prediction Accuracy Monitoring: Based on rolling accuracy
+        // Rolling accuracy is maintained by the ProfileEntry's tracking system
+        result.accuracy_confidence = @max(0.0, @min(1.0, profile.rolling_accuracy));
+        
+        // 3. Temporal Relevance Weighting: Exponential decay based on time since last measurement
+        const current_time = @as(u64, @intCast(std.time.nanoTimestamp()));
+        const time_diff_ns = current_time - profile.last_execution;
+        result.time_since_last_ms = @as(f64, @floatFromInt(time_diff_ns)) / 1_000_000.0;
+        
+        // Exponential decay with 5-minute half-life (ln(2)/300s ≈ 0.00231)
+        const decay_rate: f32 = 0.00231;
+        const time_diff_s = @as(f32, @floatCast(result.time_since_last_ms / 1000.0));
+        result.temporal_confidence = @exp(-decay_rate * time_diff_s);
+        
+        // 4. Variance Stability Measurement: Based on coefficient of variation
+        if (profile.execution_count > 2) {
+            const variance = profile.variance_sum / @as(f64, @floatFromInt(profile.execution_count - 1));
+            const mean_cycles = @as(f64, @floatFromInt(profile.total_cycles)) / @as(f64, @floatFromInt(profile.execution_count));
+            
+            if (mean_cycles > 0.0) {
+                result.coefficient_of_variation = @as(f32, @floatCast(@sqrt(variance) / mean_cycles));
+                
+                // Convert coefficient of variation to confidence (lower CV = higher confidence)
+                // Use sigmoid-like transformation: confidence = 1 / (1 + cv²)
+                const cv_squared = result.coefficient_of_variation * result.coefficient_of_variation;
+                result.variance_confidence = 1.0 / (1.0 + cv_squared);
+            } else {
+                result.variance_confidence = 0.0;
+            }
+        } else {
+            // Insufficient data for variance calculation
+            result.variance_confidence = 0.5; // Neutral confidence
+        }
+        
+        // 5. Calculate Overall Confidence: Weighted geometric mean
+        // Geometric mean prevents one poor factor from dominating
+        // Weights: sample_size (0.25), accuracy (0.35), temporal (0.20), variance (0.20)
+        const weights = struct {
+            const sample: f32 = 0.25;
+            const accuracy: f32 = 0.35;
+            const temporal: f32 = 0.20;
+            const variance: f32 = 0.20;
+        };
+        
+        // Apply weights using power scaling for geometric mean
+        const sample_weighted = std.math.pow(f32, @max(0.01, result.sample_size_confidence), weights.sample);
+        const accuracy_weighted = std.math.pow(f32, @max(0.01, result.accuracy_confidence), weights.accuracy);
+        const temporal_weighted = std.math.pow(f32, @max(0.01, result.temporal_confidence), weights.temporal);
+        const variance_weighted = std.math.pow(f32, @max(0.01, result.variance_confidence), weights.variance);
+        
+        result.overall_confidence = sample_weighted * accuracy_weighted * temporal_weighted * variance_weighted;
+        
+        return result;
+    }
+    
+    /// Get confidence category for scheduling decisions
+    pub fn getConfidenceCategory(self: MultiFactorConfidence) ConfidenceCategory {
+        if (self.overall_confidence >= 0.8) return .high;
+        if (self.overall_confidence >= 0.5) return .medium;
+        if (self.overall_confidence >= 0.2) return .low;
+        return .very_low;
+    }
+    
+    /// Confidence categories for intelligent scheduling
+    pub const ConfidenceCategory = enum {
+        very_low,   // Conservative placement, avoid risky optimizations
+        low,        // Basic optimizations only
+        medium,     // Balanced approach with moderate optimizations
+        high,       // Aggressive optimizations, NUMA placement, etc.
+    };
+    
+    /// Get detailed analysis string for debugging
+    pub fn getAnalysisString(self: MultiFactorConfidence, allocator: std.mem.Allocator) ![]u8 {
+        return std.fmt.allocPrint(allocator,
+            "MultiFactorConfidence Analysis:\n" ++
+            "  Overall: {d:.3} ({})\n" ++
+            "  Sample Size: {d:.3} ({} samples)\n" ++
+            "  Accuracy: {d:.3} (recent: {d:.3})\n" ++
+            "  Temporal: {d:.3} ({d:.1}ms ago)\n" ++
+            "  Variance: {d:.3} (CV: {d:.3})\n",
+            .{
+                self.overall_confidence, self.getConfidenceCategory(),
+                self.sample_size_confidence, self.sample_count,
+                self.accuracy_confidence, self.recent_accuracy,
+                self.temporal_confidence, self.time_since_last_ms,
+                self.variance_confidence, self.coefficient_of_variation,
+            }
+        );
+    }
+};
+
 /// Registry for storing and managing task fingerprints and their performance data
 pub const FingerprintRegistry = struct {
     const Self = @This();
@@ -826,6 +952,11 @@ pub const FingerprintRegistry = struct {
             if (self.execution_count < 2) return 0.0;
             return self.variance_sum / @as(f64, @floatFromInt(self.execution_count - 1));
         }
+        
+        /// Get enhanced multi-factor confidence model (Task 2.3.1)
+        pub fn getMultiFactorConfidence(self: *const ProfileEntry) MultiFactorConfidence {
+            return MultiFactorConfidence.calculate(self);
+        }
     };
     
     profiles: std.AutoHashMap(u64, ProfileEntry),
@@ -965,6 +1096,31 @@ pub const FingerprintRegistry = struct {
         basic: PredictionResult,
         advanced: ProfileEntry.AdvancedMetrics,
     };
+    
+    /// Get multi-factor confidence model for enhanced scheduling decisions (Task 2.3.1)
+    pub fn getMultiFactorConfidence(self: *Self, fingerprint: TaskFingerprint) MultiFactorConfidence {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+        
+        const hash = fingerprint.hash();
+        
+        if (self.profiles.get(hash)) |entry| {
+            return MultiFactorConfidence.calculate(&entry);
+        }
+        
+        // Return default confidence for unknown fingerprints
+        return MultiFactorConfidence{
+            .sample_size_confidence = 0.0,
+            .accuracy_confidence = 0.0,
+            .temporal_confidence = 0.0,
+            .variance_confidence = 0.0,
+            .overall_confidence = 0.0,
+            .sample_count = 0,
+            .recent_accuracy = 0.0,
+            .time_since_last_ms = 0.0,
+            .coefficient_of_variation = 0.0,
+        };
+    }
     
     pub fn getRegistryStats(self: *Self) RegistryStats {
         self.mutex.lock();

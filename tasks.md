@@ -63,11 +63,15 @@ This file tracks development progress across all planned features and improvemen
   - [x] Add comprehensive test suite: `zig build test-advanced-tracking`
 
 ### Confidence-Based Scheduling
-- [ ] **2.3.1**: Multi-factor confidence model
-  - [ ] Sample size confidence tracking
-  - [ ] Prediction accuracy monitoring
-  - [ ] Temporal relevance weighting
-  - [ ] Variance stability measurement
+- [x] **2.3.1**: Multi-factor confidence model ✅ **COMPLETED**
+  - [x] Sample size confidence tracking (asymptotic curve: 1 - e^(-samples/25))
+  - [x] Prediction accuracy monitoring (rolling accuracy from ProfileEntry tracking)
+  - [x] Temporal relevance weighting (exponential decay with 5-minute half-life)
+  - [x] Variance stability measurement (coefficient of variation with sigmoid transform)
+  - [x] Overall confidence calculation (weighted geometric mean)
+  - [x] Confidence categories for scheduling decisions (very_low, low, medium, high)
+  - [x] MultiFactorConfidence structure with detailed analysis capabilities
+  - [x] Add test command: `zig build test-multi-factor-confidence`
 
 - [ ] **2.3.2**: Intelligent decision framework
   - [ ] Confidence thresholds for scheduling decisions
