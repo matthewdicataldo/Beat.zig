@@ -282,6 +282,45 @@ pub fn build(b: *std.Build) void {
     const topology_stealing_test_step = b.step("test-topology-stealing", "Test topology-aware work stealing");
     topology_stealing_test_step.dependOn(&run_topology_stealing_test.step);
     
+    // Topology-aware work stealing benchmark
+    const topology_stealing_bench = b.addExecutable(.{
+        .name = "benchmark_topology_stealing",
+        .root_source_file = b.path("benchmark_topology_stealing.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, topology_stealing_bench, auto_config);
+    
+    const run_topology_stealing_bench = b.addRunArtifact(topology_stealing_bench);
+    const topology_stealing_bench_step = b.step("bench-topology", "Benchmark topology-aware work stealing performance");
+    topology_stealing_bench_step.dependOn(&run_topology_stealing_bench.step);
+    
+    // Simple topology benchmark
+    const simple_topology_bench = b.addExecutable(.{
+        .name = "simple_topology_bench",
+        .root_source_file = b.path("simple_topology_bench.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, simple_topology_bench, auto_config);
+    
+    const run_simple_topology_bench = b.addRunArtifact(simple_topology_bench);
+    const simple_topology_bench_step = b.step("bench-simple", "Simple topology-aware work stealing benchmark");
+    simple_topology_bench_step.dependOn(&run_simple_topology_bench.step);
+    
+    // Topology performance verification
+    const verify_topology_perf = b.addExecutable(.{
+        .name = "verify_topology_performance",
+        .root_source_file = b.path("verify_topology_performance.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, verify_topology_perf, auto_config);
+    
+    const run_verify_topology_perf = b.addRunArtifact(verify_topology_perf);
+    const verify_topology_perf_step = b.step("verify-topology", "Verify topology-aware work stealing performance");
+    verify_topology_perf_step.dependOn(&run_verify_topology_perf.step);
+    
     // Documentation step
     _ = b.step("docs", "Generate documentation");
     // TODO: Add proper documentation generation when available
