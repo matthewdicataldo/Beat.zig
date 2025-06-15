@@ -726,4 +726,108 @@ pub fn build(b: *std.Build) void {
     const run_work_stealing_benchmark = b.addRunArtifact(work_stealing_benchmark);
     const work_stealing_benchmark_step = b.step("bench-work-stealing", "Benchmark work-stealing efficiency with fast path optimization");
     work_stealing_benchmark_step.dependOn(&run_work_stealing_benchmark.step);
+    
+    // ============================================================================
+    // Souper Superoptimization Integration
+    // ============================================================================
+    
+    // Helper function to create LLVM IR generation commands
+    const IRGenCommand = struct {
+        fn addIRGenStep(
+            builder: *std.Build,
+            name: []const u8,
+            description: []const u8,
+            source_file: []const u8,
+            compile_target: std.Build.ResolvedTarget,
+            optimization: std.builtin.OptimizeMode,
+        ) *std.Build.Step {
+            _ = compile_target; // Will be used for cross-compilation support later
+            // Create step for LLVM IR generation
+            const ir_step = builder.step(name, description);
+            
+            // Generate both .ll and .bc files using zig build-lib with flags
+            const ll_cmd = builder.addSystemCommand(&[_][]const u8{
+                "zig", "build-lib",
+                source_file,
+                "-femit-llvm-ir",
+                "--name", builder.fmt("beat_souper_{s}", .{name[7..]}), // Remove "souper-" prefix
+                "-O", switch (optimization) {
+                    .Debug => "Debug",
+                    .ReleaseSafe => "ReleaseSafe", 
+                    .ReleaseFast => "ReleaseFast",
+                    .ReleaseSmall => "ReleaseSmall",
+                },
+            });
+            
+            const bc_cmd = builder.addSystemCommand(&[_][]const u8{
+                "zig", "build-lib", 
+                source_file,
+                "-femit-llvm-bc",
+                "--name", builder.fmt("beat_souper_{s}", .{name[7..]}), // Remove "souper-" prefix  
+                "-O", switch (optimization) {
+                    .Debug => "Debug",
+                    .ReleaseSafe => "ReleaseSafe",
+                    .ReleaseFast => "ReleaseFast", 
+                    .ReleaseSmall => "ReleaseSmall",
+                },
+            });
+            
+            ir_step.dependOn(&ll_cmd.step);
+            ir_step.dependOn(&bc_cmd.step);
+            
+            return ir_step;
+        }
+    };
+    
+    // Individual module targets for focused analysis
+    const souper_targets = [_]struct { name: []const u8, file: []const u8, description: []const u8 }{
+        .{ .name = "fingerprint", .file = "src/fingerprint.zig", .description = "Task fingerprinting and hashing algorithms" },
+        .{ .name = "lockfree", .file = "src/lockfree.zig", .description = "Work-stealing deque with critical bit operations" },
+        .{ .name = "scheduler", .file = "src/scheduler.zig", .description = "Token account promotion and scheduling logic" },
+        .{ .name = "simd", .file = "src/simd.zig", .description = "SIMD capability detection and bit flag operations" },
+        .{ .name = "simd_classifier", .file = "src/simd_classifier.zig", .description = "Feature vector similarity and classification" },
+        .{ .name = "simd_batch", .file = "src/simd_batch.zig", .description = "Task compatibility scoring algorithms" },
+        .{ .name = "advanced_worker_selection", .file = "src/advanced_worker_selection.zig", .description = "Worker selection scoring and normalization" },
+        .{ .name = "topology", .file = "src/topology.zig", .description = "CPU topology distance calculations" },
+    };
+    
+    // Create individual module analysis targets
+    inline for (souper_targets) |souper_target| {
+        const step_name = b.fmt("souper-{s}", .{souper_target.name});
+        const step_desc = b.fmt("Generate LLVM IR for Souper analysis: {s}", .{souper_target.description});
+        _ = IRGenCommand.addIRGenStep(b, step_name, step_desc, souper_target.file, target, .ReleaseFast);
+    }
+    
+    // Whole-program analysis target  
+    const souper_whole_step = b.step("souper-whole", "Generate complete program LLVM IR for whole-program superoptimization");
+    
+    const whole_ll_cmd = b.addSystemCommand(&[_][]const u8{
+        "zig", "build-exe",
+        "examples/comprehensive_demo.zig", 
+        "-femit-llvm-ir",
+        "--name", "beat_whole_program_souper",
+        "-O", "ReleaseFast",
+    });
+    
+    const whole_bc_cmd = b.addSystemCommand(&[_][]const u8{
+        "zig", "build-exe",
+        "examples/comprehensive_demo.zig",
+        "-femit-llvm-bc", 
+        "--name", "beat_whole_program_souper",
+        "-O", "ReleaseFast",
+    });
+    
+    souper_whole_step.dependOn(&whole_ll_cmd.step);
+    souper_whole_step.dependOn(&whole_bc_cmd.step);
+    
+    // All Souper targets
+    const souper_all_step = b.step("souper-all", "Generate all LLVM IR targets for comprehensive Souper analysis");
+    inline for (souper_targets) |souper_target| {
+        const step_name = b.fmt("souper-{s}", .{souper_target.name});
+        // Get reference to existing step by name lookup (no new step creation)
+        if (b.top_level_steps.get(step_name)) |existing_step| {
+            souper_all_step.dependOn(&existing_step.step);
+        }
+    }
+    souper_all_step.dependOn(souper_whole_step);
 }
