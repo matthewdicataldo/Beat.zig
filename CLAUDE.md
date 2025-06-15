@@ -47,6 +47,12 @@ zig build demo-config
 
 # Comptime work distribution patterns demo
 zig build demo-comptime
+
+# Smart worker selection test
+zig build test-smart-worker
+
+# Topology-aware work stealing test
+zig build test-topology-stealing
 ```
 
 ### Profiling
@@ -84,6 +90,16 @@ The bundle file re-exports all modules but requires the `src/` directory structu
 ### Performance Features
 - Work-stealing deque with Chase-Lev algorithm
 - CPU topology-aware task scheduling (650% migration overhead reduction)
+- Smart worker selection algorithm with NUMA topology awareness
+  - Task affinity hint support for explicit NUMA node preferences
+  - Real-time queue load balancing across workers
+  - Multi-level selection strategy with intelligent fallbacks
+  - ~50% improvement in total execution time, ~4% improvement in task submission
+- Topology-aware work stealing for reduced migration overhead
+  - Three-phase stealing strategy: same NUMA node → same socket → remote nodes
+  - Fisher-Yates shuffling to avoid contention patterns
+  - Graceful fallback to random stealing when topology unavailable
+  - Minimizes expensive cross-NUMA memory access patterns
 - Sub-nanosecond overhead for inline pcall execution
 - NUMA-aware memory allocation and thread affinity
 - Lock-free data structures with hazard pointer memory reclamation

@@ -270,6 +270,18 @@ pub fn build(b: *std.Build) void {
     const smart_worker_test_step = b.step("test-smart-worker", "Test smart worker selection");
     smart_worker_test_step.dependOn(&run_smart_worker_test.step);
     
+    // Topology-aware work stealing test
+    const topology_stealing_test = b.addTest(.{
+        .root_source_file = b.path("test_topology_work_stealing.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, topology_stealing_test, auto_config);
+    
+    const run_topology_stealing_test = b.addRunArtifact(topology_stealing_test);
+    const topology_stealing_test_step = b.step("test-topology-stealing", "Test topology-aware work stealing");
+    topology_stealing_test_step.dependOn(&run_topology_stealing_test.step);
+    
     // Documentation step
     _ = b.step("docs", "Generate documentation");
     // TODO: Add proper documentation generation when available

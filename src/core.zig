@@ -540,28 +540,190 @@ pub const ThreadPool = struct {
         coz.latencyBegin(coz.Points.queue_steal);
         defer coz.latencyEnd(coz.Points.queue_steal);
         
-        // TODO: Implement topology-aware stealing order
-        // For now, try random victim
-        const victim_id = std.crypto.random.uintLessThan(usize, pool.workers.len);
+        // Topology-aware stealing order: prioritize victims by locality
+        if (pool.topology) |topo| {
+            return pool.stealWorkTopologyAware(worker, topo);
+        } else {
+            return pool.stealWorkRandom(worker);
+        }
+    }
+    
+    fn stealWorkTopologyAware(self: *Self, worker: *Worker, topo: topology.CpuTopology) ?Task {
+        const worker_numa = worker.numa_node orelse 0;
+        
+        // Try stealing in order of preference:
+        // 1. Same NUMA node (highest locality)
+        // 2. Same socket, different NUMA node
+        // 3. Different socket (lowest locality)
+        
+        // Phase 1: Try same NUMA node workers first
+        if (self.tryStealFromNumaNode(worker, worker_numa)) |task| {
+            return task;
+        }
+        
+        // Phase 2: Try workers on same socket but different NUMA nodes
+        if (self.tryStealFromSocket(worker, topo, worker_numa)) |task| {
+            return task;
+        }
+        
+        // Phase 3: Try workers on different sockets (last resort)
+        if (self.tryStealFromRemoteNodes(worker, worker_numa)) |task| {
+            return task;
+        }
+        
+        return null;
+    }
+    
+    fn tryStealFromNumaNode(self: *Self, worker: *Worker, numa_node: u32) ?Task {
+        // Create a list of candidate workers on the same NUMA node
+        var candidates: [16]usize = undefined; // Support up to 16 workers per NUMA node
+        var candidate_count: usize = 0;
+        
+        for (self.workers, 0..) |*candidate_worker, i| {
+            if (i == worker.id) continue; // Don't steal from ourselves
+            if (candidate_worker.numa_node == numa_node and candidate_count < candidates.len) {
+                candidates[candidate_count] = i;
+                candidate_count += 1;
+            }
+        }
+        
+        // Try candidates in random order to avoid contention patterns
+        if (candidate_count > 0) {
+            return self.tryStealFromCandidates(candidates[0..candidate_count]);
+        }
+        
+        return null;
+    }
+    
+    fn tryStealFromSocket(self: *Self, worker: *Worker, topo: topology.CpuTopology, worker_numa: u32) ?Task {
+        // Find our socket ID through CPU topology
+        const worker_socket = blk: {
+            if (worker.cpu_id) |cpu_id| {
+                for (topo.cores) |core| {
+                    if (core.logical_id == cpu_id) {
+                        break :blk core.socket_id;
+                    }
+                }
+            }
+            break :blk 0; // Default to socket 0
+        };
+        
+        var candidates: [16]usize = undefined;
+        var candidate_count: usize = 0;
+        
+        for (self.workers, 0..) |*candidate_worker, i| {
+            if (i == worker.id) continue;
+            if (candidate_worker.numa_node == worker_numa) continue; // Already tried same NUMA
+            
+            // Check if candidate is on same socket
+            if (candidate_worker.cpu_id) |cpu_id| {
+                for (topo.cores) |core| {
+                    if (core.logical_id == cpu_id and core.socket_id == worker_socket) {
+                        if (candidate_count < candidates.len) {
+                            candidates[candidate_count] = i;
+                            candidate_count += 1;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
+        if (candidate_count > 0) {
+            return self.tryStealFromCandidates(candidates[0..candidate_count]);
+        }
+        
+        return null;
+    }
+    
+    fn tryStealFromRemoteNodes(self: *Self, worker: *Worker, worker_numa: u32) ?Task {
+        var candidates: [16]usize = undefined;
+        var candidate_count: usize = 0;
+        
+        for (self.workers, 0..) |*candidate_worker, i| {
+            if (i == worker.id) continue;
+            if (candidate_worker.numa_node == worker_numa) continue; // Already tried
+            
+            if (candidate_count < candidates.len) {
+                candidates[candidate_count] = i;
+                candidate_count += 1;
+            }
+        }
+        
+        if (candidate_count > 0) {
+            return self.tryStealFromCandidates(candidates[0..candidate_count]);
+        }
+        
+        return null;
+    }
+    
+    fn tryStealFromCandidates(self: *Self, candidates: []const usize) ?Task {
+        // Shuffle candidates to avoid contention patterns
+        var shuffled_candidates: [16]usize = undefined;
+        @memcpy(shuffled_candidates[0..candidates.len], candidates);
+        
+        // Simple Fisher-Yates shuffle for the candidates
+        var i = candidates.len;
+        while (i > 1) {
+            i -= 1;
+            const j = std.crypto.random.uintLessThan(usize, i + 1);
+            const temp = shuffled_candidates[i];
+            shuffled_candidates[i] = shuffled_candidates[j];
+            shuffled_candidates[j] = temp;
+        }
+        
+        // Try stealing from shuffled candidates
+        for (shuffled_candidates[0..candidates.len]) |victim_id| {
+            const victim = &self.workers[victim_id];
+            
+            switch (victim.queue) {
+                .mutex => |*q| {
+                    if (q.steal()) |task| {
+                        self.stats.recordSteal();
+                        coz.throughput(coz.Points.task_stolen);
+                        return task;
+                    }
+                },
+                .lockfree => |*q| {
+                    if (q.steal()) |task_ptr| {
+                        self.stats.recordSteal();
+                        coz.throughput(coz.Points.task_stolen);
+                        // Get task value and potentially free the allocation
+                        const task = task_ptr.*;
+                        if (self.memory_pool) |mem_pool| {
+                            mem_pool.free(task_ptr);
+                        }
+                        return task;
+                    }
+                },
+            }
+        }
+        
+        return null;
+    }
+    
+    fn stealWorkRandom(self: *Self, worker: *Worker) ?Task {
+        // Fallback to random stealing when topology is not available
+        const victim_id = std.crypto.random.uintLessThan(usize, self.workers.len);
         if (victim_id == worker.id) return null;
         
-        const victim = &pool.workers[victim_id];
+        const victim = &self.workers[victim_id];
         
         switch (victim.queue) {
             .mutex => |*q| {
                 if (q.steal()) |task| {
-                    pool.stats.recordSteal();
+                    self.stats.recordSteal();
                     coz.throughput(coz.Points.task_stolen);
                     return task;
                 }
             },
             .lockfree => |*q| {
                 if (q.steal()) |task_ptr| {
-                    pool.stats.recordSteal();
+                    self.stats.recordSteal();
                     coz.throughput(coz.Points.task_stolen);
                     // Get task value and potentially free the allocation
                     const task = task_ptr.*;
-                    if (pool.memory_pool) |mem_pool| {
+                    if (self.memory_pool) |mem_pool| {
                         mem_pool.free(task_ptr);
                     }
                     return task;
