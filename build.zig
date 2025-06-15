@@ -246,6 +246,18 @@ pub fn build(b: *std.Build) void {
     const build_config_demo_step = b.step("demo-config", "Run build configuration demo");
     build_config_demo_step.dependOn(&run_build_config_demo.step);
     
+    // Comptime work distribution demo
+    const comptime_work_demo = b.addTest(.{
+        .root_source_file = b.path("comptime_work_demo.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, comptime_work_demo, auto_config);
+    
+    const run_comptime_work_demo = b.addRunArtifact(comptime_work_demo);
+    const comptime_work_demo_step = b.step("demo-comptime", "Run comptime work distribution demo");
+    comptime_work_demo_step.dependOn(&run_comptime_work_demo.step);
+    
     // Documentation step
     _ = b.step("docs", "Generate documentation");
     // TODO: Add proper documentation generation when available

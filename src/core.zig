@@ -11,6 +11,7 @@ pub const pcall = @import("pcall.zig");
 pub const coz = @import("coz.zig");
 pub const testing = @import("testing.zig");
 pub const build_opts = @import("build_opts.zig");
+pub const comptime_work = @import("comptime_work.zig");
 
 // Version info
 pub const version = std.SemanticVersion{
