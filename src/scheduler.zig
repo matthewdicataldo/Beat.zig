@@ -88,6 +88,9 @@ pub const Scheduler = struct {
     // Per-worker token accounts
     worker_tokens: []TokenAccount,
     
+    // Promotion tracking
+    promotions_triggered: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    
     pub fn init(allocator: std.mem.Allocator, config: *const core.Config) !*Scheduler {
         const self = try allocator.create(Scheduler);
         self.* = .{
@@ -120,6 +123,31 @@ pub const Scheduler = struct {
         self.allocator.destroy(self);
     }
     
+    /// Trigger work promotion for a specific worker
+    /// This signals that the worker has favorable work:overhead ratio
+    pub fn triggerPromotion(self: *Scheduler, worker_id: u32) void {
+        // Record the promotion event
+        _ = self.promotions_triggered.fetchAdd(1, .monotonic);
+        
+        // Log promotion for debugging (in debug builds)
+        if (builtin.mode == .Debug) {
+            std.debug.print("Scheduler: Work promotion triggered for worker {} (total: {})\n", .{
+                worker_id, self.promotions_triggered.load(.monotonic)
+            });
+        }
+        
+        // Future enhancement: Could signal thread pool for:
+        // - Prioritizing this worker's queue
+        // - Adjusting worker thread priorities  
+        // - Triggering load balancing
+        // - Influencing task placement decisions
+    }
+    
+    /// Get promotion statistics
+    pub fn getPromotionCount(self: *const Scheduler) u64 {
+        return self.promotions_triggered.load(.acquire);
+    }
+    
     fn heartbeatLoop(self: *Scheduler) void {
         const interval_ns = @as(u64, self.config.heartbeat_interval_us) * 1000;
         
@@ -127,9 +155,10 @@ pub const Scheduler = struct {
             std.time.sleep(interval_ns);
             
             // Periodic promotion check
-            for (self.worker_tokens) |*tokens| {
+            for (self.worker_tokens, 0..) |*tokens, worker_id| {
                 if (tokens.shouldPromote()) {
-                    // TODO: Trigger work promotion
+                    // Trigger work promotion: signal that work execution is efficient
+                    self.triggerPromotion(@intCast(worker_id));
                     tokens.reset();
                 }
             }

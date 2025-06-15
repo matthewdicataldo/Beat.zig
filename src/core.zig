@@ -28,8 +28,8 @@ pub const cache_line_size = 64;
 // ============================================================================
 
 pub const Config = struct {
-    // Thread pool settings
-    num_workers: ?usize = null,              // null = physical CPU count
+    // Thread pool settings - auto-tuned based on hardware detection
+    num_workers: ?usize = build_opts.hardware.optimal_workers, // Auto-detected optimal
     min_workers: usize = 2,                  
     max_workers: ?usize = null,              // null = 2x physical cores
     
@@ -43,19 +43,20 @@ pub const Config = struct {
     promotion_threshold: u64 = 10,           // Work:overhead ratio
     min_work_cycles: u64 = 1000,            // Min cycles for promotion
     
-    // V3 features (all enabled by default)
-    enable_topology_aware: bool = true,      // CPU topology awareness
-    enable_numa_aware: bool = true,          // NUMA-aware allocation
+    // V3 features - auto-enabled based on hardware detection
+    enable_topology_aware: bool = build_opts.performance.enable_topology_aware,
+    enable_numa_aware: bool = build_opts.performance.enable_numa_aware,
     enable_lock_free: bool = true,          // Lock-free data structures
     enable_predictive: bool = true,          // Predictive scheduling with One Euro Filter
     
     // One Euro Filter parameters for task execution prediction
-    prediction_min_cutoff: f32 = 1.0,       // Minimum cutoff frequency (Hz)
-    prediction_beta: f32 = 0.1,              // Speed coefficient for adaptation
+    // Auto-tuned based on hardware characteristics, but can be overridden
+    prediction_min_cutoff: f32 = build_opts.performance.one_euro_min_cutoff,
+    prediction_beta: f32 = build_opts.performance.one_euro_beta,
     prediction_d_cutoff: f32 = 1.0,          // Derivative cutoff frequency
     
-    // Performance tuning
-    task_queue_size: u32 = 1024,            // Per-worker queue size
+    // Performance tuning - auto-tuned based on hardware detection
+    task_queue_size: u32 = build_opts.hardware.optimal_queue_size,
     cache_line_size: u32 = cache_line_size,
     
     // Statistics and debugging

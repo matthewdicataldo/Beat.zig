@@ -321,6 +321,30 @@ pub fn build(b: *std.Build) void {
     const verify_topology_perf_step = b.step("verify-topology", "Verify topology-aware work stealing performance");
     verify_topology_perf_step.dependOn(&run_verify_topology_perf.step);
     
+    // Work promotion test
+    const work_promotion_test = b.addTest(.{
+        .root_source_file = b.path("test_work_promotion.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, work_promotion_test, auto_config);
+    
+    const run_work_promotion_test = b.addRunArtifact(work_promotion_test);
+    const work_promotion_test_step = b.step("test-promotion", "Test work promotion trigger");
+    work_promotion_test_step.dependOn(&run_work_promotion_test.step);
+    
+    // Auto-configuration integration demo
+    const auto_config_integration_demo = b.addTest(.{
+        .root_source_file = b.path("auto_config_integration_demo.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, auto_config_integration_demo, auto_config);
+    
+    const run_auto_config_integration_demo = b.addRunArtifact(auto_config_integration_demo);
+    const auto_config_integration_demo_step = b.step("demo-integration", "Demonstrate auto-configuration integration with One Euro Filter");
+    auto_config_integration_demo_step.dependOn(&run_auto_config_integration_demo.step);
+    
     // Documentation step
     _ = b.step("docs", "Generate documentation");
     // TODO: Add proper documentation generation when available

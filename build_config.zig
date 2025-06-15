@@ -158,20 +158,60 @@ fn calculateOptimalSettings(config: *BuildConfig) void {
 
 /// Tune One Euro Filter parameters based on system characteristics
 fn tuneOneEuroFilter(config: *BuildConfig) void {
-    // High-performance systems: More aggressive adaptation
+    // Base tuning on CPU count and architecture characteristics
     if (config.cpu_count >= 16) {
+        // High-performance systems: More aggressive adaptation
         config.one_euro_min_cutoff = 1.5; // More responsive
         config.one_euro_beta = 0.15;      // Faster adaptation
-    }
-    // Mid-range systems: Balanced settings
-    else if (config.cpu_count >= 8) {
+        
+        // SIMD-capable systems can handle more aggressive filtering
+        if (config.has_avx2 or config.has_avx512) {
+            config.one_euro_beta = 0.18; // Even faster for vector workloads
+        }
+    } else if (config.cpu_count >= 8) {
+        // Mid-range systems: Balanced settings
         config.one_euro_min_cutoff = 1.0; // Default
         config.one_euro_beta = 0.1;       // Default
-    }
-    // Low-core systems: More conservative
-    else {
+        
+        // Adjust for SIMD availability
+        if (config.has_avx or config.has_neon) {
+            config.one_euro_min_cutoff = 1.2; // Slightly more responsive
+        }
+    } else {
+        // Low-core systems: More conservative
         config.one_euro_min_cutoff = 0.7; // More stable
         config.one_euro_beta = 0.08;      // Slower adaptation
+        
+        // Even more conservative for embedded/mobile
+        if (config.target_arch == .aarch64 and config.cpu_count <= 4) {
+            config.one_euro_min_cutoff = 0.5;
+            config.one_euro_beta = 0.05;
+        }
+    }
+    
+    // Architecture-specific adjustments
+    switch (config.target_arch) {
+        .x86_64 => {
+            // x86_64 typically has good branch prediction and larger caches
+            // Can handle slightly more aggressive adaptation
+            config.one_euro_beta *= 1.1;
+        },
+        .aarch64 => {
+            // ARM often has simpler cores, be more conservative
+            config.one_euro_beta *= 0.9;
+        },
+        else => {
+            // Conservative for unknown architectures
+            config.one_euro_beta *= 0.8;
+        },
+    }
+    
+    // NUMA-aware adjustment
+    if (config.numa_nodes > 1) {
+        // NUMA systems have variable memory latencies
+        // Use more conservative filtering to handle outliers
+        config.one_euro_min_cutoff *= 0.9; // Slightly more stable
+        config.one_euro_beta *= 0.95;      // Slightly slower adaptation
     }
 }
 
