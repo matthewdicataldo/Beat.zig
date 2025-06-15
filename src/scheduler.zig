@@ -246,7 +246,7 @@ pub const Scheduler = struct {
         
         // Log significant pressure changes
         if (builtin.mode == .Debug) {
-            std.debug.print("Scheduler: Memory pressure changed to {s} (some_avg10: {d:.1f}%, mem_used: {d:.1f}%)\n", 
+            std.debug.print("Scheduler: Memory pressure changed to {s} (some_avg10: {:.1}%, mem_used: {:.1}%)\n", 
                 .{ @tagName(level), metrics.some_avg10, metrics.memory_used_pct });
         }
         
