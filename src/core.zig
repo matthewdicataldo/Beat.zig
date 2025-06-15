@@ -281,6 +281,7 @@ pub const ThreadPoolStats = struct {
     tasks_completed: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     tasks_stolen: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     tasks_cancelled: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    fast_path_executions: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     
     pub fn recordSubmit(self: *ThreadPoolStats) void {
         _ = self.tasks_submitted.fetchAdd(1, .monotonic);
@@ -297,6 +298,21 @@ pub const ThreadPoolStats = struct {
     pub fn recordCancel(self: *ThreadPoolStats) void {
         _ = self.tasks_cancelled.fetchAdd(1, .monotonic);
     }
+    
+    pub fn recordFastPathExecution(self: *ThreadPoolStats) void {
+        _ = self.fast_path_executions.fetchAdd(1, .monotonic);
+    }
+    
+    /// Get work-stealing efficiency ratio (completed via work-stealing / total completed)
+    pub fn getWorkStealingEfficiency(self: *const ThreadPoolStats) f64 {
+        const total_completed = self.tasks_completed.load(.monotonic);
+        const fast_path_count = self.fast_path_executions.load(.monotonic);
+        const work_stealing_completed = if (total_completed > fast_path_count) 
+            total_completed - fast_path_count else 0;
+        
+        if (total_completed == 0) return 0.0;
+        return @as(f64, @floatFromInt(work_stealing_completed)) / @as(f64, @floatFromInt(total_completed));
+    }
 };
 
 // ============================================================================
@@ -309,6 +325,11 @@ pub const ThreadPool = struct {
     workers: []Worker,
     running: std.atomic.Value(bool),
     stats: ThreadPoolStats,
+    
+    // Fast path optimization for small tasks (work-stealing efficiency improvement)
+    fast_path_enabled: bool = true,
+    fast_path_threshold: u32 = 256, // bytes
+    fast_path_counter: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     
     // Optional subsystems
     topology: ?topology.CpuTopology = null,
@@ -588,7 +609,21 @@ pub const ThreadPool = struct {
         self.stats.recordSubmit();
         coz.throughput(coz.Points.task_submitted);
         
-        // Choose worker based on affinity hint and current load
+        // FAST PATH: For very small tasks (likely <500ns execution time), 
+        // execute immediately to avoid submission overhead (200-300ns)
+        const task_data_size = task.data_size_hint orelse 0;
+        
+        // Heuristic: tasks with small data footprint and normal priority are likely fast
+        const is_likely_fast_task = (task_data_size <= 256) and (task.priority == .normal);
+        
+        if (is_likely_fast_task and self.should_use_fast_path()) {
+            // Execute immediately on calling thread to avoid all overhead
+            task.func(task.data);
+            self.stats.recordFastPathExecution();
+            return;
+        }
+        
+        // STANDARD PATH: Choose worker based on affinity hint and current load
         const worker_id = self.selectWorker(task);
         const worker = &self.workers[worker_id];
         
@@ -632,6 +667,36 @@ pub const ThreadPool = struct {
             if (all_empty) break;
             std.time.sleep(10_000); // 10 microseconds
         }
+    }
+    
+    /// Determine if fast path execution should be used for small tasks
+    /// This helps improve work-stealing efficiency by avoiding overhead for tiny tasks
+    pub fn should_use_fast_path(self: *Self) bool {
+        if (!self.fast_path_enabled) return false;
+        
+        // Use fast path when work-stealing efficiency is low (below 60%)
+        // This indicates that overhead is dominating task execution time
+        const efficiency = self.stats.getWorkStealingEfficiency();
+        const should_boost = efficiency < 0.6; // Below 60% efficiency
+        
+        // Also consider system load - use fast path when workers are relatively idle
+        var idle_workers: u32 = 0;
+        for (self.workers) |*worker| {
+            const is_idle = switch (worker.queue) {
+                .mutex => |*q| blk: {
+                    q.mutex.lock();
+                    defer q.mutex.unlock();
+                    break :blk (q.tasks[0].items.len + q.tasks[1].items.len + q.tasks[2].items.len) < 2;
+                },
+                .lockfree => |*q| q.size() < 2,
+            };
+            if (is_idle) idle_workers += 1;
+        }
+        
+        const idle_ratio = @as(f64, @floatFromInt(idle_workers)) / @as(f64, @floatFromInt(self.workers.len));
+        const workers_available = idle_ratio > 0.3; // At least 30% workers relatively idle
+        
+        return should_boost or workers_available;
     }
     
     pub fn selectWorker(self: *Self, task: Task) usize {

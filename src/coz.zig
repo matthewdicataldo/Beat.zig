@@ -4,23 +4,21 @@ const builtin = @import("builtin");
 // ===== COZ Profiling Support =====
 // Following the same pattern as Reverb's integration
 
-// Export dummy functions that COZ can intercept
-// NOTE: Comment these out if your parent project already exports them
-// pub export fn coz_progress_begin(name: [*:0]const u8) void {
-//     _ = name;
-// }
-
-// pub export fn coz_progress_end(name: [*:0]const u8) void {
-//     _ = name;
-// }
-
-// Internal versions for ZigPulse use
-fn coz_progress_begin(name: [*:0]const u8) void {
+// Export functions that COZ can intercept
+pub export fn coz_progress_begin(name: [*:0]const u8) void {
     _ = name;
+    // COZ will replace this with instrumentation
 }
 
-fn coz_progress_end(name: [*:0]const u8) void {
+pub export fn coz_progress_end(name: [*:0]const u8) void {
     _ = name;
+    // COZ will replace this with instrumentation
+}
+
+// Export progress function for throughput measurements
+pub export fn coz_progress_named(name: [*:0]const u8) void {
+    _ = name;
+    // COZ will replace this with instrumentation
 }
 
 // COZ backend with compile-time optimization
@@ -31,7 +29,10 @@ pub const Backend = if (builtin.mode == .Debug or builtin.mode == .ReleaseSafe) 
             var count: usize = 0;
         };
         _ = @atomicRmw(usize, &COUNTER.count, .Add, 1, .monotonic);
-        _ = name;
+        
+        // Call COZ progress function with null-terminated name
+        const null_terminated = name ++ "\x00";
+        coz_progress_named(@ptrCast(null_terminated));
     }
 
     // Mark latency region begin

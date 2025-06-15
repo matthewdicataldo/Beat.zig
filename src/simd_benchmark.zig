@@ -322,24 +322,34 @@ pub const SIMDBenchmarkSuite = struct {
         for (0..100) |_| {
             self.timer.start();
             
-            // SIMD arithmetic operations (simulated - would use actual SIMD intrinsics)
+            // REAL SIMD arithmetic operations using @Vector
             const vector_width = 8; // AVX256 = 8 f32 elements
+            const VectorType = @Vector(vector_width, f32);
             const aligned_size = (size / vector_width) * vector_width;
             
-            // Process vectorized portion
+            // Process vectorized portion with REAL SIMD
             for (0..aligned_size / vector_width) |chunk| {
                 const base_idx = chunk * vector_width;
-                for (0..vector_width) |lane| {
-                    const idx = base_idx + lane;
-                    data[idx] = data[idx] * 1.5 + 0.5;
-                    data[idx] = @sin(data[idx]) + @cos(data[idx] * 2.0);
-                }
+                
+                // Load vector from memory
+                const vec_data: VectorType = data[base_idx..base_idx + vector_width][0..vector_width].*;
+                
+                // Vectorized arithmetic: data = data * 1.5 + 0.5
+                var vec_result = vec_data * @as(VectorType, @splat(1.5)) + @as(VectorType, @splat(0.5));
+                
+                // Vectorized transcendental functions (if supported)
+                // Note: sin/cos are typically scalar, so we'll use simpler operations for real SIMD
+                vec_result = vec_result * vec_result + @as(VectorType, @splat(0.1)); // x² + 0.1
+                
+                // Store result back to memory (efficient vector storage)
+                const result_array: [vector_width]f32 = vec_result;
+                @memcpy(data[base_idx..base_idx + vector_width], &result_array);
             }
             
-            // Process remaining elements scalar
+            // Process remaining elements scalar (matching SIMD operations)
             for (aligned_size..size) |i| {
                 data[i] = data[i] * 1.5 + 0.5;
-                data[i] = @sin(data[i]) + @cos(data[i] * 2.0);
+                data[i] = data[i] * data[i] + 0.1; // x² + 0.1 (matching SIMD)
             }
             
             try self.timer.end();
@@ -440,23 +450,37 @@ pub const SIMDBenchmarkSuite = struct {
         for (0..20) |_| {
             self.timer.start();
             
-            // SIMD-optimized matrix multiplication (simulated)
+            // REAL SIMD-optimized matrix multiplication
             const vector_width = 8; // AVX256
+            const VectorType = @Vector(vector_width, f32);
             for (0..size) |i| {
                 for (0..size) |j| {
                     var sum: f32 = 0.0;
                     
-                    // Vectorized inner loop
+                    // Vectorized inner loop with real SIMD
                     const aligned_size = (size / vector_width) * vector_width;
+                    var sum_vec: VectorType = @splat(0.0);
+                    
                     for (0..aligned_size / vector_width) |chunk| {
                         const base_k = chunk * vector_width;
-                        for (0..vector_width) |lane| {
-                            const k = base_k + lane;
-                            sum += matrix_a[i * size + k] * matrix_b[k * size + j];
+                        
+                        // Load vectors from row A and column B
+                        const vec_a: VectorType = matrix_a[i * size + base_k..i * size + base_k + vector_width][0..vector_width].*;
+                        
+                        // Load column B values (this is less efficient due to strided access)
+                        var vec_b: VectorType = undefined;
+                        inline for (0..vector_width) |lane| {
+                            vec_b[lane] = matrix_b[(base_k + lane) * size + j];
                         }
+                        
+                        // Vectorized multiply-accumulate
+                        sum_vec = sum_vec + vec_a * vec_b;
                     }
                     
-                    // Handle remaining elements
+                    // Horizontal sum of vector
+                    sum += @reduce(.Add, sum_vec);
+                    
+                    // Handle remaining elements scalar
                     for (aligned_size..size) |k| {
                         sum += matrix_a[i * size + k] * matrix_b[k * size + j];
                     }
@@ -1047,7 +1071,8 @@ pub const SIMDBenchmarkSuite = struct {
     
     /// Benchmark specific vector width performance
     pub fn benchmarkVectorWidth(self: *Self, vector_width: usize) !f64 {
-        const size = 1024;
+        // Use larger size and more work to reduce timing overhead
+        const size = 4096; // 4x larger dataset
         const data = try self.allocator.alloc(f32, size);
         defer self.allocator.free(data);
         
@@ -1056,34 +1081,76 @@ pub const SIMDBenchmarkSuite = struct {
             value.* = @as(f32, @floatFromInt(i)) * 0.1;
         }
         
-        // Benchmark scalar version
+        // Benchmark scalar version with more work
         self.timer.reset();
         for (0..100) |_| {
             self.timer.start();
             for (data) |*value| {
+                // Match the vector arithmetic complexity: 2 operations per element
                 value.* = value.* * 1.5 + 0.5;
+                value.* = value.* * value.* + 0.1; // x² + 0.1 (matching vector arithmetic)
             }
             try self.timer.end();
         }
         const scalar_stats = self.timer.getStatistics();
         
-        // Benchmark vector version
+        // Benchmark vector version - use generic approach to avoid switch overhead
         self.timer.reset();
         for (0..100) |_| {
             self.timer.start();
             
+            // Generic vectorized implementation based on vector_width
             const aligned_size = (size / vector_width) * vector_width;
-            for (0..aligned_size / vector_width) |chunk| {
-                const base_idx = chunk * vector_width;
-                for (0..vector_width) |lane| {
-                    const idx = base_idx + lane;
-                    data[idx] = data[idx] * 1.5 + 0.5;
+            
+            // Process in chunks of vector_width
+            var i: usize = 0;
+            while (i < aligned_size) : (i += vector_width) {
+                // Use comptime to generate efficient code for each vector width
+                switch (vector_width) {
+                    2 => {
+                        const VectorType = @Vector(2, f32);
+                        const vec_data: VectorType = data[i..i + 2][0..2].*;
+                        var vec_result = vec_data * @as(VectorType, @splat(1.5)) + @as(VectorType, @splat(0.5));
+                        vec_result = vec_result * vec_result + @as(VectorType, @splat(0.1)); // Match complexity
+                        const result_array: [2]f32 = vec_result;
+                        @memcpy(data[i..i + 2], &result_array);
+                    },
+                    4 => {
+                        const VectorType = @Vector(4, f32);
+                        const vec_data: VectorType = data[i..i + 4][0..4].*;
+                        var vec_result = vec_data * @as(VectorType, @splat(1.5)) + @as(VectorType, @splat(0.5));
+                        vec_result = vec_result * vec_result + @as(VectorType, @splat(0.1)); // Match complexity
+                        const result_array: [4]f32 = vec_result;
+                        @memcpy(data[i..i + 4], &result_array);
+                    },
+                    8 => {
+                        const VectorType = @Vector(8, f32);
+                        const vec_data: VectorType = data[i..i + 8][0..8].*;
+                        var vec_result = vec_data * @as(VectorType, @splat(1.5)) + @as(VectorType, @splat(0.5));
+                        vec_result = vec_result * vec_result + @as(VectorType, @splat(0.1)); // Match complexity
+                        const result_array: [8]f32 = vec_result;
+                        @memcpy(data[i..i + 8], &result_array);
+                    },
+                    16 => {
+                        const VectorType = @Vector(16, f32);
+                        const vec_data: VectorType = data[i..i + 16][0..16].*;
+                        var vec_result = vec_data * @as(VectorType, @splat(1.5)) + @as(VectorType, @splat(0.5));
+                        vec_result = vec_result * vec_result + @as(VectorType, @splat(0.1)); // Match complexity
+                        const result_array: [16]f32 = vec_result;
+                        @memcpy(data[i..i + 16], &result_array);
+                    },
+                    else => {
+                        // Fallback to scalar with matching complexity
+                        data[i] = data[i] * 1.5 + 0.5;
+                        data[i] = data[i] * data[i] + 0.1;
+                    },
                 }
             }
             
-            // Handle remaining elements
-            for (aligned_size..size) |i| {
-                data[i] = data[i] * 1.5 + 0.5;
+            // Handle remaining elements with matching complexity
+            for (aligned_size..size) |idx| {
+                data[idx] = data[idx] * 1.5 + 0.5;
+                data[idx] = data[idx] * data[idx] + 0.1;
             }
             
             try self.timer.end();

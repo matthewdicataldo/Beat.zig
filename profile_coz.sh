@@ -43,13 +43,11 @@ echo ""
 # Disable COZ web server to avoid port conflicts
 export COZ_DISABLE_WEB_SERVER=1
 
-# Run with COZ
+# Run with COZ - using simpler approach for better compatibility
 coz run \
-    --binary-scope benchmark_coz \
+    --binary benchmark_coz \
     --source-scope src/ \
-    --progress zigpulse_task_completed \
-    --progress zigpulse_task_stolen \
-    --progress zigpulse_worker_idle \
+    --end-to-end \
     --output zigpulse_profile.coz \
     --- $BENCHMARK_PATH
 

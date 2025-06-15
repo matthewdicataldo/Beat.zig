@@ -126,7 +126,7 @@ pub fn build(b: *std.Build) void {
     // COZ profiling benchmark
     const coz_benchmark = b.addExecutable(.{
         .name = "benchmark_coz",
-        .root_source_file = b.path("benchmark_coz.zig"),
+        .root_source_file = b.path("benchmarks/benchmark_coz.zig"),
         .target = target,
         .optimize = if (enable_coz) .ReleaseSafe else .ReleaseFast,
     });
@@ -552,6 +552,19 @@ pub fn build(b: *std.Build) void {
     const sycl_detection_test_step = b.step("test-sycl-detection", "Test SYCL SDK detection and build system integration");
     sycl_detection_test_step.dependOn(&run_sycl_detection_test.step);
     
+    // ML-based classification integration test (Task 3.2.2)
+    const ml_integration_test = b.addTest(.{
+        .root_source_file = b.path("test_ml_integration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    ml_integration_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, ml_integration_test, auto_config);
+    
+    const run_ml_integration_test = b.addRunArtifact(ml_integration_test);
+    const ml_integration_test_step = b.step("test-ml-integration", "Test ML-based classification for heterogeneous computing (Task 3.2.2)");
+    ml_integration_test_step.dependOn(&run_ml_integration_test.step);
+    
     // Advanced scheduling benchmark
     const advanced_scheduling_benchmark = b.addExecutable(.{
         .name = "benchmark_advanced_scheduling",
@@ -685,4 +698,32 @@ pub fn build(b: *std.Build) void {
     const run_fixed_cache_optimization = b.addRunArtifact(fixed_cache_optimization);
     const fixed_cache_optimization_step = b.step("test-fixed-cache-optimization", "Test fixed prediction lookup caching with proper memory management");
     fixed_cache_optimization_step.dependOn(&run_fixed_cache_optimization.step);
+    
+    // Batch formation profiling
+    const batch_formation_profile = b.addExecutable(.{
+        .name = "batch_formation_profile",
+        .root_source_file = b.path("batch_formation_profile.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    batch_formation_profile.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, batch_formation_profile, auto_config);
+    
+    const run_batch_formation_profile = b.addRunArtifact(batch_formation_profile);
+    const batch_formation_profile_step = b.step("profile-batch-formation", "Profile batch formation performance bottlenecks");
+    batch_formation_profile_step.dependOn(&run_batch_formation_profile.step);
+    
+    // Work-stealing efficiency benchmark with fast path optimization
+    const work_stealing_benchmark = b.addExecutable(.{
+        .name = "work_stealing_benchmark",
+        .root_source_file = b.path("work_stealing_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    work_stealing_benchmark.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, work_stealing_benchmark, auto_config);
+    
+    const run_work_stealing_benchmark = b.addRunArtifact(work_stealing_benchmark);
+    const work_stealing_benchmark_step = b.step("bench-work-stealing", "Benchmark work-stealing efficiency with fast path optimization");
+    work_stealing_benchmark_step.dependOn(&run_work_stealing_benchmark.step);
 }

@@ -181,8 +181,8 @@ pub fn main() !void {
         
         std.debug.print("    Steal rate: {d:.1}%\n\n", .{steal_rate});
         
-        // Small delay between scenarios
-        std.time.sleep(100_000_000); // 100ms
+        // Longer delay between scenarios for COZ profiling
+        std.time.sleep(500_000_000); // 500ms
     }
     
     std.debug.print("=== COZ Profiling Notes ===\n", .{});
@@ -196,6 +196,39 @@ pub fn main() !void {
     std.debug.print("  2. Work-stealing algorithm\n", .{});
     std.debug.print("  3. Memory allocation\n", .{});
     std.debug.print("  4. Queue operations\n", .{});
+    
+    // Additional continuous load for COZ profiling
+    std.debug.print("\n=== Running continuous load for enhanced profiling ===\n", .{});
+    try runContinuousLoad(pool, 10); // 10 seconds of continuous work
+}
+
+// Simplified continuous load function 
+fn runContinuousLoad(pool: *zigpulse.ThreadPool, duration_seconds: u32) !void {
+    const start = std.time.milliTimestamp();
+    const duration_ms = duration_seconds * 1000;
+    
+    var task_count: u64 = 0;
+    var task_size: u32 = 1000;
+    
+    while (std.time.milliTimestamp() - start < duration_ms) {
+        const task = zigpulse.Task{
+            .func = cpuBoundWork,
+            .data = @ptrCast(&task_size),
+        };
+        
+        try pool.submit(task);
+        task_count += 1;
+        
+        // Brief pause to prevent overwhelming
+        if (task_count % 100 == 0) {
+            std.time.sleep(1_000_000); // 1ms
+        }
+    }
+    
+    // Wait for remaining tasks to complete
+    std.time.sleep(1_000_000_000); // 1 second
+    
+    std.debug.print("Completed {} tasks in continuous load phase\n", .{task_count});
 }
 
 // Test harness for continuous load (useful for COZ)
