@@ -1,8 +1,17 @@
 const std = @import("std");
+const build_config = @import("build_config.zig");
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    
+    // Auto-detect system configuration
+    const auto_config = build_config.detectBuildConfig(b, target, optimize);
+    
+    // Print configuration summary
+    if (b.verbose) {
+        build_config.printConfigSummary(auto_config);
+    }
     
     // COZ profiling support
     const enable_coz = b.option(bool, "coz", "Enable COZ profiler support") orelse false;
@@ -14,26 +23,43 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    
+    // Add auto-configuration to library
+    build_config.addBuildOptions(b, lib, auto_config);
+    
     b.installArtifact(lib);
     
-    // Tests
+    // Tests with auto-configuration
     const tests = b.addTest(.{
         .root_source_file = b.path("src/core.zig"),
         .target = target,
         .optimize = optimize,
     });
     
+    // Add auto-configuration to tests
+    build_config.addBuildOptions(b, tests, auto_config);
+    
+    // Set optimal test parallelization
+    // Note: Test parallelization will be handled by our enhanced testing framework
+    
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
     
-    // Benchmarks
+    // Benchmarks with auto-configuration
     const benchmark_exe = b.addExecutable(.{
         .name = "benchmark",
         .root_source_file = b.path("benchmark.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
+    
+    // Add auto-configuration optimized for benchmarking
+    var bench_config = auto_config;
+    bench_config.is_release_fast = true;
+    bench_config.optimal_queue_size = auto_config.optimal_workers * 256; // Larger queues for benchmarks
+    build_config.addBuildOptions(b, benchmark_exe, bench_config);
+    
     b.installArtifact(benchmark_exe);
     
     const run_benchmark = b.addRunArtifact(benchmark_exe);
@@ -207,6 +233,18 @@ pub fn build(b: *std.Build) void {
     const run_test_cpu_detection = b.addRunArtifact(test_cpu_detection);
     const test_cpu_detection_step = b.step("test-cpu", "Test CPU detection");
     test_cpu_detection_step.dependOn(&run_test_cpu_detection.step);
+    
+    // Build configuration demo (as test)
+    const build_config_demo = b.addTest(.{
+        .root_source_file = b.path("build_config_demo.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, build_config_demo, auto_config);
+    
+    const run_build_config_demo = b.addRunArtifact(build_config_demo);
+    const build_config_demo_step = b.step("demo-config", "Run build configuration demo");
+    build_config_demo_step.dependOn(&run_build_config_demo.step);
     
     // Documentation step
     _ = b.step("docs", "Generate documentation");

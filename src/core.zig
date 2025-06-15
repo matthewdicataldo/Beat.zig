@@ -10,6 +10,7 @@ pub const scheduler = @import("scheduler.zig");
 pub const pcall = @import("pcall.zig");
 pub const coz = @import("coz.zig");
 pub const testing = @import("testing.zig");
+pub const build_opts = @import("build_opts.zig");
 
 // Version info
 pub const version = std.SemanticVersion{
@@ -487,10 +488,30 @@ pub const ThreadPool = struct {
 // Public API
 // ============================================================================
 
+/// Create a thread pool with default configuration
 pub fn createPool(allocator: std.mem.Allocator) !*ThreadPool {
     return ThreadPool.init(allocator, Config{});
 }
 
+/// Create a thread pool with custom configuration
 pub fn createPoolWithConfig(allocator: std.mem.Allocator, config: Config) !*ThreadPool {
     return ThreadPool.init(allocator, config);
+}
+
+/// Create a thread pool with auto-detected optimal configuration
+pub fn createOptimalPool(allocator: std.mem.Allocator) !*ThreadPool {
+    const optimal_config = build_opts.getOptimalConfig();
+    return ThreadPool.init(allocator, optimal_config);
+}
+
+/// Create a thread pool optimized for testing
+pub fn createTestPool(allocator: std.mem.Allocator) !*ThreadPool {
+    const test_config = build_opts.getTestConfig();
+    return ThreadPool.init(allocator, test_config);
+}
+
+/// Create a thread pool optimized for benchmarking
+pub fn createBenchmarkPool(allocator: std.mem.Allocator) !*ThreadPool {
+    const benchmark_config = build_opts.getBenchmarkConfig();
+    return ThreadPool.init(allocator, benchmark_config);
 }
