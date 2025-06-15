@@ -23,6 +23,7 @@ pub const simd = @import("simd.zig");
 pub const simd_batch = @import("simd_batch.zig");
 pub const simd_queue = @import("simd_queue.zig");
 pub const simd_classifier = @import("simd_classifier.zig");
+pub const simd_benchmark = @import("simd_benchmark.zig");
 
 // Version info
 pub const version = std.SemanticVersion{

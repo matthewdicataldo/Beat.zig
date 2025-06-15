@@ -41,6 +41,13 @@ zig build test-multi-factor-confidence
 zig build test-intelligent-decision
 zig build test-predictive-accounting
 zig build test-advanced-worker-selection
+
+# SIMD task processing tests
+zig build test-simd
+zig build test-simd-batch
+zig build test-simd-queue
+zig build test-simd-classification
+zig build test-simd-benchmark
 ```
 
 ### Demos
