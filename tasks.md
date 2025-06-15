@@ -127,6 +127,85 @@ This file tracks development progress across all planned features and improvemen
 
 **Expected Impact**: 20-30% reduction in scheduling overhead, 15-25% improvement in cache locality
 
+## Phase 2.6: Memory-Aware Task Scheduling 🧠 **NEW**
+
+### Memory Pressure Detection and Response
+- [ ] **2.6.1**: System memory pressure monitoring ⭐ **HIGH PRIORITY**
+  - [ ] Linux PSI (Pressure Stall Information) integration for real-time memory pressure
+  - [ ] Cross-platform memory utilization detection (Windows, macOS fallbacks)
+  - [ ] MemoryPressureMonitor with atomic pressure state updates
+  - [ ] Configurable pressure thresholds and response strategies
+  - [ ] Integration with existing heartbeat scheduler for adaptive behavior
+
+- [ ] **2.6.2**: Memory bandwidth monitoring ⭐ **HIGH PRIORITY**
+  - [ ] Hardware performance counter integration (Intel PCM, perf_events)
+  - [ ] Per-NUMA node bandwidth utilization tracking
+  - [ ] BandwidthMonitor with lock-free atomic updates
+  - [ ] Memory bandwidth-aware worker selection enhancements
+  - [ ] Integration with existing topology awareness
+
+### Task Memory Profiling and Classification
+- [ ] **2.6.3**: Enhanced task metadata for memory awareness ⭐ **HIGH PRIORITY**
+  - [ ] Extended Task structure with memory usage patterns
+  - [ ] Memory access pattern classification (sequential, random, streaming, locality-aware)
+  - [ ] Expected memory footprint estimation and tracking
+  - [ ] NUMA preference hints for memory-intensive tasks
+  - [ ] Cache working set size estimation for locality optimization
+
+- [ ] **2.6.4**: Memory usage prediction with One Euro Filter ⭐ **MEDIUM PRIORITY**
+  - [ ] Extend existing One Euro Filter to predict memory usage patterns
+  - [ ] MemoryUsagePredictor integration with FingerprintRegistry
+  - [ ] Adaptive memory footprint tracking per task fingerprint
+  - [ ] Confidence-based memory placement decisions
+  - [ ] Integration with existing prediction accuracy tracking
+
+### Memory-Aware Scheduling Algorithms
+- [ ] **2.6.5**: Enhanced worker selection with memory criteria ⭐ **HIGH PRIORITY**
+  - [ ] Extend AdvancedWorkerSelector with memory-aware scoring
+  - [ ] Memory locality weight in multi-criteria optimization
+  - [ ] Memory pressure adaptation in worker selection decisions
+  - [ ] Cache affinity-aware task placement
+  - [ ] NUMA-aware memory access optimization
+
+- [ ] **2.6.6**: Memory-aware work stealing ⭐ **MEDIUM PRIORITY**
+  - [ ] Enhance existing topology-aware work stealing with memory considerations
+  - [ ] Memory pressure-aware stealing priority (local NUMA preferred under pressure)
+  - [ ] Bandwidth utilization-aware victim selection
+  - [ ] Cache locality preservation in stolen task placement
+  - [ ] Integration with existing Chase-Lev deque optimizations
+
+### Adaptive Memory Management
+- [ ] **2.6.7**: Memory pressure response strategies ⭐ **MEDIUM PRIORITY**
+  - [ ] Task deferral mechanisms during high memory pressure
+  - [ ] Memory pressure callback system for applications
+  - [ ] Adaptive queue sizing based on memory availability
+  - [ ] Memory-aware task batching and coalescing
+  - [ ] Integration with existing Config and development mode
+
+- [ ] **2.6.8**: NUMA-aware memory allocation enhancement ⭐ **LOW PRIORITY**
+  - [ ] Extend existing memory pools with NUMA awareness
+  - [ ] Memory migration strategies for long-running tasks
+  - [ ] Linux mbind() integration for memory binding
+  - [ ] Memory locality tracking and optimization
+  - [ ] Integration with existing TypedPool and memory management
+
+### Performance Validation and Measurement
+- [ ] **2.6.9**: Memory-aware scheduling benchmarks ⭐ **MEDIUM PRIORITY**
+  - [ ] Memory-intensive workload benchmarking framework
+  - [ ] Memory pressure simulation and testing
+  - [ ] Memory bandwidth utilization measurement
+  - [ ] Cache locality improvement quantification
+  - [ ] Integration with existing A/B testing infrastructure
+
+- [ ] **2.6.10**: Memory scheduling metrics and monitoring ⭐ **LOW PRIORITY**
+  - [ ] Memory pressure response time measurement
+  - [ ] Memory locality optimization effectiveness tracking
+  - [ ] NUMA memory access pattern analysis
+  - [ ] Memory bandwidth efficiency metrics
+  - [ ] Integration with existing COZ profiler support
+
+**Expected Impact**: 15-30% performance improvement for memory-intensive workloads, 20-40% reduction in memory pressure incidents, 10-25% improvement in NUMA memory locality
+
 ## Phase 3: Hardware Acceleration & GPU Integration 🚧
 
 ### SYCL GPU Integration Foundation

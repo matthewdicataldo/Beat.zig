@@ -11,7 +11,9 @@
       "Bash(zig test:*)",
       "Bash(zig build:*)",
       "WebFetch(domain:gery.casiez.net)",
-      "WebFetch(domain:jaantollander.com)"
+      "WebFetch(domain:jaantollander.com)",
+      "Bash(rg:*)",
+      "Bash(rm:*)"
     ],
     "deny": []
   }

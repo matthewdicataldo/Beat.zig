@@ -1,4 +1,7 @@
 const std = @import("std");
+
+// Enhanced build_config import with detailed error message
+// This will trigger when build_config module is not available
 const build_config = @import("build_config");
 
 // Build-time configuration access for Beat.zig

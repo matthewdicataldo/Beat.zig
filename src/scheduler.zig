@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const core = @import("core.zig");
+const memory_pressure = @import("memory_pressure.zig");
 
 // Scheduling algorithms for Beat.zig
 //
@@ -91,17 +92,52 @@ pub const Scheduler = struct {
     // Promotion tracking
     promotions_triggered: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     
+    // Memory pressure monitoring (V3 - Memory-Aware Scheduling)
+    memory_monitor: ?*memory_pressure.MemoryPressureMonitor = null,
+    memory_pressure_callbacks: memory_pressure.PressureCallbackRegistry,
+    
+    // Memory-aware scheduling state
+    pressure_adaptations: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    last_pressure_check: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    
     pub fn init(allocator: std.mem.Allocator, config: *const core.Config) !*Scheduler {
         const self = try allocator.create(Scheduler);
         self.* = .{
             .allocator = allocator,
             .config = config,
             .worker_tokens = try allocator.alloc(TokenAccount, config.num_workers orelse 1),
+            .memory_pressure_callbacks = memory_pressure.PressureCallbackRegistry.init(allocator),
         };
         
         // Initialize token accounts
         for (self.worker_tokens) |*tokens| {
             tokens.* = TokenAccount.init(config);
+        }
+        
+        // Initialize memory pressure monitoring if enabled
+        if (config.enable_numa_aware) { // Reuse NUMA flag for memory awareness
+            const pressure_config = memory_pressure.MemoryPressureConfig{
+                .update_interval_ms = config.heartbeat_interval_us / 1000, // Sync with heartbeat
+            };
+            
+            self.memory_monitor = memory_pressure.MemoryPressureMonitor.init(allocator, pressure_config) catch |err| blk: {
+                // Memory monitoring is optional - log error but continue
+                if (builtin.mode == .Debug) {
+                    std.debug.print("Scheduler: Failed to initialize memory monitor: {}\n", .{err});
+                }
+                break :blk null;
+            };
+            
+            // Start memory monitoring if successfully initialized
+            if (self.memory_monitor) |monitor| {
+                monitor.start() catch |err| {
+                    if (builtin.mode == .Debug) {
+                        std.debug.print("Scheduler: Failed to start memory monitor: {}\n", .{err});
+                    }
+                    monitor.deinit();
+                    self.memory_monitor = null;
+                };
+            }
         }
         
         // Start heartbeat thread if enabled
@@ -119,6 +155,12 @@ pub const Scheduler = struct {
             thread.join();
         }
         
+        // Cleanup memory pressure monitoring
+        if (self.memory_monitor) |monitor| {
+            monitor.deinit();
+        }
+        
+        self.memory_pressure_callbacks.deinit();
         self.allocator.free(self.worker_tokens);
         self.allocator.destroy(self);
     }
@@ -148,8 +190,105 @@ pub const Scheduler = struct {
         return self.promotions_triggered.load(.acquire);
     }
     
+    // ========================================================================
+    // Memory-Aware Scheduling (V3)
+    // ========================================================================
+    
+    /// Get current memory pressure level
+    pub fn getMemoryPressureLevel(self: *const Scheduler) memory_pressure.MemoryPressureLevel {
+        if (self.memory_monitor) |monitor| {
+            return monitor.getCurrentLevel();
+        }
+        return .none;
+    }
+    
+    /// Get current memory pressure metrics
+    pub fn getMemoryPressureMetrics(self: *const Scheduler) ?memory_pressure.MemoryPressureMetrics {
+        if (self.memory_monitor) |monitor| {
+            return monitor.getCurrentMetrics();
+        }
+        return null;
+    }
+    
+    /// Check if memory pressure suggests deferring new tasks
+    pub fn shouldDeferTasksForMemory(self: *const Scheduler) bool {
+        if (self.memory_monitor) |monitor| {
+            return monitor.shouldDeferTasks();
+        }
+        return false;
+    }
+    
+    /// Check if memory pressure suggests preferring local NUMA placement
+    pub fn shouldPreferLocalNUMAForMemory(self: *const Scheduler) bool {
+        if (self.memory_monitor) |monitor| {
+            return monitor.shouldPreferLocalNUMA();
+        }
+        return false;
+    }
+    
+    /// Get recommended task batch limit based on memory pressure
+    pub fn getMemoryAwareBatchLimit(self: *const Scheduler, default_limit: u32) u32 {
+        if (self.memory_monitor) |monitor| {
+            return monitor.getTaskBatchLimit(default_limit);
+        }
+        return default_limit;
+    }
+    
+    /// Register a callback for memory pressure events
+    pub fn registerMemoryPressureCallback(self: *Scheduler, callback: memory_pressure.PressureCallback) !void {
+        try self.memory_pressure_callbacks.register(callback);
+    }
+    
+    /// Handle memory pressure change (called by heartbeat loop)
+    fn handleMemoryPressureChange(self: *Scheduler, level: memory_pressure.MemoryPressureLevel, metrics: *const memory_pressure.MemoryPressureMetrics) void {
+        // Record adaptation event
+        _ = self.pressure_adaptations.fetchAdd(1, .monotonic);
+        
+        // Log significant pressure changes
+        if (builtin.mode == .Debug) {
+            std.debug.print("Scheduler: Memory pressure changed to {s} (some_avg10: {d:.1f}%, mem_used: {d:.1f}%)\n", 
+                .{ @tagName(level), metrics.some_avg10, metrics.memory_used_pct });
+        }
+        
+        // Trigger registered callbacks
+        self.memory_pressure_callbacks.triggerCallbacks(level, metrics);
+        
+        // Built-in adaptive behaviors based on pressure level
+        switch (level) {
+            .none, .low => {
+                // Normal operation or slight preference for local NUMA
+                // No specific action needed - handled by scheduling decisions
+            },
+            .medium => {
+                // Start deferring non-critical tasks and reducing batch sizes
+                // This is handled by the scheduling decision functions above
+                if (builtin.mode == .Debug) {
+                    std.debug.print("Scheduler: Enabling medium memory pressure adaptations\n", .{});
+                }
+            },
+            .high => {
+                // Aggressive memory management - significant task deferral
+                if (builtin.mode == .Debug) {
+                    std.debug.print("Scheduler: Enabling high memory pressure adaptations\n", .{});
+                }
+            },
+            .critical => {
+                // Emergency mode - minimal task acceptance
+                if (builtin.mode == .Debug) {
+                    std.debug.print("Scheduler: CRITICAL memory pressure - emergency adaptations active\n", .{});
+                }
+            },
+        }
+    }
+    
+    /// Get memory pressure adaptation statistics
+    pub fn getMemoryAdaptationCount(self: *const Scheduler) u64 {
+        return self.pressure_adaptations.load(.acquire);
+    }
+    
     fn heartbeatLoop(self: *Scheduler) void {
         const interval_ns = @as(u64, self.config.heartbeat_interval_us) * 1000;
+        var previous_pressure_level: memory_pressure.MemoryPressureLevel = .none;
         
         while (self.running.load(.acquire)) {
             std.time.sleep(interval_ns);
@@ -160,6 +299,22 @@ pub const Scheduler = struct {
                     // Trigger work promotion: signal that work execution is efficient
                     self.triggerPromotion(@intCast(worker_id));
                     tokens.reset();
+                }
+            }
+            
+            // Memory pressure monitoring (V3 - Memory-Aware Scheduling)
+            if (self.memory_monitor) |monitor| {
+                const current_level = monitor.getCurrentLevel();
+                
+                // Only trigger handler if pressure level changed or on significant updates
+                if (current_level != previous_pressure_level) {
+                    const metrics = monitor.getCurrentMetrics();
+                    self.handleMemoryPressureChange(current_level, &metrics);
+                    previous_pressure_level = current_level;
+                    
+                    // Update timestamp of last pressure check
+                    const current_time = @as(u64, @intCast(std.time.nanoTimestamp()));
+                    self.last_pressure_check.store(current_time, .release);
                 }
             }
         }

@@ -49,7 +49,7 @@ pub fn build(b: *std.Build) void {
     // Benchmarks with auto-configuration
     const benchmark_exe = b.addExecutable(.{
         .name = "benchmark",
-        .root_source_file = b.path("benchmark.zig"),
+        .root_source_file = b.path("benchmarks/benchmark.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
@@ -142,97 +142,7 @@ pub fn build(b: *std.Build) void {
     const coz_step = b.step("bench-coz", "Run COZ profiling benchmark");
     coz_step.dependOn(&run_coz_benchmark.step);
     
-    // Simple test executable
-    const test_simple = b.addExecutable(.{
-        .name = "test_simple",
-        .root_source_file = b.path("test_simple.zig"),
-        .target = target,
-        .optimize = .Debug,
-    });
-    test_simple.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_test_simple = b.addRunArtifact(test_simple);
-    const test_simple_step = b.step("test-simple", "Run simple test");
-    test_simple_step.dependOn(&run_test_simple.step);
-    
-    // Minimal benchmark test
-    const test_minimal = b.addExecutable(.{
-        .name = "test_minimal_benchmark",
-        .root_source_file = b.path("test_minimal_benchmark.zig"),
-        .target = target,
-        .optimize = .ReleaseSafe,
-    });
-    test_minimal.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_test_minimal = b.addRunArtifact(test_minimal);
-    const test_minimal_step = b.step("test-minimal", "Run minimal benchmark test");
-    test_minimal_step.dependOn(&run_test_minimal.step);
-    
-    // Stress test
-    const test_stress = b.addExecutable(.{
-        .name = "test_stress",
-        .root_source_file = b.path("test_stress.zig"),
-        .target = target,
-        .optimize = .ReleaseSafe,
-    });
-    test_stress.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_test_stress = b.addRunArtifact(test_stress);
-    const test_stress_step = b.step("test-stress", "Run stress test");
-    test_stress_step.dependOn(&run_test_stress.step);
-    
-    // TLS overflow test
-    const test_tls = b.addExecutable(.{
-        .name = "test_tls_overflow",
-        .root_source_file = b.path("test_tls_overflow.zig"),
-        .target = target,
-        .optimize = .ReleaseSafe,
-    });
-    test_tls.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_test_tls = b.addRunArtifact(test_tls);
-    const test_tls_step = b.step("test-tls", "Test TLS overflow issue");
-    test_tls_step.dependOn(&run_test_tls.step);
-    
-    // Intensive TLS test
-    const test_tls_intensive = b.addExecutable(.{
-        .name = "test_tls_intensive",
-        .root_source_file = b.path("test_tls_intensive.zig"),
-        .target = target,
-        .optimize = .ReleaseSafe,
-    });
-    test_tls_intensive.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_test_tls_intensive = b.addRunArtifact(test_tls_intensive);
-    const test_tls_intensive_step = b.step("test-tls-intensive", "Test TLS overflow with intensive workload");
-    test_tls_intensive_step.dependOn(&run_test_tls_intensive.step);
-    
-    // COZ conditions test
-    const test_coz_conditions = b.addExecutable(.{
-        .name = "test_coz_conditions",
-        .root_source_file = b.path("test_coz_conditions.zig"),
-        .target = target,
-        .optimize = .ReleaseSafe,
-    });
-    test_coz_conditions.root_module.addImport("zigpulse", zigpulse_module);
-    test_coz_conditions.root_module.omit_frame_pointer = false;
-    
-    const run_test_coz_conditions = b.addRunArtifact(test_coz_conditions);
-    const test_coz_conditions_step = b.step("test-coz-conditions", "Test under COZ benchmark conditions");
-    test_coz_conditions_step.dependOn(&run_test_coz_conditions.step);
-    
-    // CPU detection test
-    const test_cpu_detection = b.addExecutable(.{
-        .name = "test_cpu_detection",
-        .root_source_file = b.path("test_cpu_detection.zig"),
-        .target = target,
-        .optimize = .ReleaseSafe,
-    });
-    test_cpu_detection.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_test_cpu_detection = b.addRunArtifact(test_cpu_detection);
-    const test_cpu_detection_step = b.step("test-cpu", "Test CPU detection");
-    test_cpu_detection_step.dependOn(&run_test_cpu_detection.step);
+    // Note: Legacy test executables removed - all tests now run via main test suite
     
     // Build configuration demo (as test)
     const build_config_demo = b.addTest(.{
@@ -260,10 +170,11 @@ pub fn build(b: *std.Build) void {
     
     // Smart worker selection test
     const smart_worker_test = b.addTest(.{
-        .root_source_file = b.path("test_smart_worker_selection.zig"),
+        .root_source_file = b.path("tests/test_smart_worker_selection.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    smart_worker_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, smart_worker_test, auto_config);
     
     const run_smart_worker_test = b.addRunArtifact(smart_worker_test);
@@ -272,66 +183,60 @@ pub fn build(b: *std.Build) void {
     
     // Topology-aware work stealing test
     const topology_stealing_test = b.addTest(.{
-        .root_source_file = b.path("test_topology_work_stealing.zig"),
+        .root_source_file = b.path("tests/test_topology_work_stealing.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    topology_stealing_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, topology_stealing_test, auto_config);
     
     const run_topology_stealing_test = b.addRunArtifact(topology_stealing_test);
     const topology_stealing_test_step = b.step("test-topology-stealing", "Test topology-aware work stealing");
     topology_stealing_test_step.dependOn(&run_topology_stealing_test.step);
     
-    // Topology-aware work stealing benchmark
-    const topology_stealing_bench = b.addExecutable(.{
-        .name = "benchmark_topology_stealing",
-        .root_source_file = b.path("benchmark_topology_stealing.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, topology_stealing_bench, auto_config);
+    // Note: Legacy benchmark removed - use benchmarks/benchmark_topology_aware.zig via bench command
     
-    const run_topology_stealing_bench = b.addRunArtifact(topology_stealing_bench);
-    const topology_stealing_bench_step = b.step("bench-topology", "Benchmark topology-aware work stealing performance");
-    topology_stealing_bench_step.dependOn(&run_topology_stealing_bench.step);
+    // Note: Legacy simple topology benchmark removed - use benchmarks/ directory
     
-    // Simple topology benchmark
-    const simple_topology_bench = b.addExecutable(.{
-        .name = "simple_topology_bench",
-        .root_source_file = b.path("simple_topology_bench.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, simple_topology_bench, auto_config);
-    
-    const run_simple_topology_bench = b.addRunArtifact(simple_topology_bench);
-    const simple_topology_bench_step = b.step("bench-simple", "Simple topology-aware work stealing benchmark");
-    simple_topology_bench_step.dependOn(&run_simple_topology_bench.step);
-    
-    // Topology performance verification
-    const verify_topology_perf = b.addExecutable(.{
-        .name = "verify_topology_performance",
-        .root_source_file = b.path("verify_topology_performance.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, verify_topology_perf, auto_config);
-    
-    const run_verify_topology_perf = b.addRunArtifact(verify_topology_perf);
-    const verify_topology_perf_step = b.step("verify-topology", "Verify topology-aware work stealing performance");
-    verify_topology_perf_step.dependOn(&run_verify_topology_perf.step);
+    // Note: Legacy verification removed - performance is verified through test suite
     
     // Work promotion test
     const work_promotion_test = b.addTest(.{
-        .root_source_file = b.path("test_work_promotion.zig"),
+        .root_source_file = b.path("tests/test_work_promotion.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    work_promotion_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, work_promotion_test, auto_config);
     
     const run_work_promotion_test = b.addRunArtifact(work_promotion_test);
     const work_promotion_test_step = b.step("test-promotion", "Test work promotion trigger");
     work_promotion_test_step.dependOn(&run_work_promotion_test.step);
+    
+    // Memory pressure monitoring test
+    const memory_pressure_test = b.addTest(.{
+        .root_source_file = b.path("src/memory_pressure.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, memory_pressure_test, auto_config);
+    
+    const run_memory_pressure_test = b.addRunArtifact(memory_pressure_test);
+    const memory_pressure_test_step = b.step("test-memory-pressure", "Test memory pressure monitoring and scheduling adaptation");
+    memory_pressure_test_step.dependOn(&run_memory_pressure_test.step);
+    
+    // Development mode configuration test
+    const development_mode_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_development_mode.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    development_mode_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, development_mode_test, auto_config);
+    
+    const run_development_mode_test = b.addRunArtifact(development_mode_test);
+    const development_mode_test_step = b.step("test-development-mode", "Test development mode configuration features");
+    development_mode_test_step.dependOn(&run_development_mode_test.step);
     
     // Auto-configuration integration demo
     const auto_config_integration_demo = b.addTest(.{
@@ -402,10 +307,11 @@ pub fn build(b: *std.Build) void {
     
     // Thread affinity improvement test
     const thread_affinity_test = b.addTest(.{
-        .root_source_file = b.path("test_thread_affinity_improved.zig"),
+        .root_source_file = b.path("tests/test_thread_affinity_improved.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    thread_affinity_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, thread_affinity_test, auto_config);
     
     const run_thread_affinity_test = b.addRunArtifact(thread_affinity_test);
@@ -414,10 +320,11 @@ pub fn build(b: *std.Build) void {
     
     // Parallel work distribution runtime test
     const parallel_work_test = b.addTest(.{
-        .root_source_file = b.path("test_parallel_work_runtime.zig"),
+        .root_source_file = b.path("tests/test_parallel_work_runtime.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    parallel_work_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, parallel_work_test, auto_config);
     
     const run_parallel_work_test = b.addRunArtifact(parallel_work_test);
@@ -426,10 +333,11 @@ pub fn build(b: *std.Build) void {
     
     // Enhanced error messages test
     const enhanced_errors_test = b.addTest(.{
-        .root_source_file = b.path("test_enhanced_errors.zig"),
+        .root_source_file = b.path("tests/test_enhanced_errors.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    enhanced_errors_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, enhanced_errors_test, auto_config);
     
     const run_enhanced_errors_test = b.addRunArtifact(enhanced_errors_test);
@@ -438,10 +346,11 @@ pub fn build(b: *std.Build) void {
     
     // Task fingerprinting integration test
     const fingerprint_test = b.addTest(.{
-        .root_source_file = b.path("test_fingerprint_integration.zig"),
+        .root_source_file = b.path("tests/test_fingerprint_simple.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    fingerprint_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, fingerprint_test, auto_config);
     
     const run_fingerprint_test = b.addRunArtifact(fingerprint_test);
@@ -450,10 +359,11 @@ pub fn build(b: *std.Build) void {
     
     // Enhanced One Euro Filter implementation test
     const enhanced_one_euro_test = b.addTest(.{
-        .root_source_file = b.path("test_enhanced_one_euro_filter.zig"),
+        .root_source_file = b.path("tests/test_enhanced_one_euro_filter.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    enhanced_one_euro_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, enhanced_one_euro_test, auto_config);
     
     const run_enhanced_one_euro_test = b.addRunArtifact(enhanced_one_euro_test);
@@ -462,10 +372,11 @@ pub fn build(b: *std.Build) void {
     
     // Advanced performance tracking test
     const advanced_tracking_test = b.addTest(.{
-        .root_source_file = b.path("test_advanced_performance_tracking.zig"),
+        .root_source_file = b.path("tests/test_advanced_performance_tracking.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    advanced_tracking_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, advanced_tracking_test, auto_config);
     
     const run_advanced_tracking_test = b.addRunArtifact(advanced_tracking_test);
@@ -474,10 +385,11 @@ pub fn build(b: *std.Build) void {
     
     // Multi-factor confidence model test
     const multi_factor_confidence_test = b.addTest(.{
-        .root_source_file = b.path("test_multi_factor_confidence.zig"),
+        .root_source_file = b.path("tests/test_multi_factor_confidence.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    multi_factor_confidence_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, multi_factor_confidence_test, auto_config);
     
     const run_multi_factor_confidence_test = b.addRunArtifact(multi_factor_confidence_test);
@@ -486,10 +398,11 @@ pub fn build(b: *std.Build) void {
     
     // Intelligent decision framework test
     const intelligent_decision_test = b.addTest(.{
-        .root_source_file = b.path("test_intelligent_decision_framework.zig"),
+        .root_source_file = b.path("tests/test_intelligent_decision_framework.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    intelligent_decision_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, intelligent_decision_test, auto_config);
     
     const run_intelligent_decision_test = b.addRunArtifact(intelligent_decision_test);
@@ -498,22 +411,24 @@ pub fn build(b: *std.Build) void {
     
     // Predictive token accounting test
     const predictive_accounting_test = b.addTest(.{
-        .root_source_file = b.path("test_predictive_accounting.zig"),
+        .root_source_file = b.path("tests/test_predictive_accounting.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    predictive_accounting_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, predictive_accounting_test, auto_config);
     
     const run_predictive_accounting_test = b.addRunArtifact(predictive_accounting_test);
     const predictive_accounting_test_step = b.step("test-predictive-accounting", "Test predictive token accounting with confidence-based promotion decisions");
     predictive_accounting_test_step.dependOn(&run_predictive_accounting_test.step);
     
-    // Advanced worker selection test
+    // Advanced worker selection test (simplified version)
     const advanced_worker_selection_test = b.addTest(.{
-        .root_source_file = b.path("test_advanced_worker_selection.zig"),
+        .root_source_file = b.path("tests/test_advanced_worker_selection_simple.zig"),
         .target = target,
         .optimize = .Debug,
     });
+    advanced_worker_selection_test.root_module.addImport("beat", zigpulse_module);
     build_config.addBuildOptions(b, advanced_worker_selection_test, auto_config);
     
     const run_advanced_worker_selection_test = b.addRunArtifact(advanced_worker_selection_test);

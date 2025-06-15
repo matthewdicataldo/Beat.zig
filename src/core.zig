@@ -10,12 +10,15 @@ pub const scheduler = @import("scheduler.zig");
 pub const pcall = @import("pcall.zig");
 pub const coz = @import("coz.zig");
 pub const testing = @import("testing.zig");
-pub const build_opts = @import("build_opts.zig");
+// Use smart build configuration that handles dependency scenarios
+pub const build_opts = @import("build_opts_new.zig");
 pub const comptime_work = @import("comptime_work.zig");
+pub const enhanced_errors = @import("enhanced_errors.zig");
 pub const fingerprint = @import("fingerprint.zig");
 pub const intelligent_decision = @import("intelligent_decision.zig");
 pub const predictive_accounting = @import("predictive_accounting.zig");
 pub const advanced_worker_selection = @import("advanced_worker_selection.zig");
+pub const memory_pressure = @import("memory_pressure.zig");
 
 // Version info
 pub const version = std.SemanticVersion{
@@ -71,6 +74,140 @@ pub const Config = struct {
     enable_advanced_selection: bool = true,        // Use multi-criteria optimization
     selection_criteria: ?advanced_worker_selection.SelectionCriteria = null,  // null = auto-detect optimal
     enable_selection_learning: bool = true,       // Adaptive criteria adjustment
+    
+    // Development mode configuration
+    development_mode: bool = false,               // Enable comprehensive development features
+    verbose_logging: bool = false,                // Detailed operation logging
+    performance_validation: bool = false,        // Runtime performance checks
+    memory_debugging: bool = false,               // Enhanced memory tracking
+    task_tracing: bool = false,                   // Individual task execution tracing
+    scheduler_profiling: bool = false,            // Detailed scheduler performance profiling
+    deadlock_detection: bool = false,             // Runtime deadlock detection
+    resource_leak_detection: bool = false,        // Resource cleanup validation
+    
+    /// Create a development configuration with comprehensive debugging enabled
+    pub fn createDevelopmentConfig() Config {
+        var config = Config{};
+        config.development_mode = true;
+        config.verbose_logging = true;
+        config.performance_validation = true;
+        config.memory_debugging = true;
+        config.task_tracing = true;
+        config.scheduler_profiling = true;
+        config.deadlock_detection = true;
+        config.resource_leak_detection = true;
+        config.enable_trace = true;
+        config.enable_statistics = true;
+        
+        // Conservative settings for debugging
+        config.num_workers = 2;  // Smaller pool for easier debugging
+        config.task_queue_size = 16; // Smaller queue for faster issue detection
+        config.heartbeat_interval_us = 50; // More frequent heartbeats for responsiveness
+        
+        return config;
+    }
+    
+    /// Create a testing configuration optimized for unit tests
+    pub fn createTestingConfig() Config {
+        var config = Config{};
+        config.development_mode = true;
+        config.verbose_logging = false; // Reduce noise in tests
+        config.performance_validation = true;
+        config.memory_debugging = true;
+        config.resource_leak_detection = true;
+        config.enable_statistics = true;
+        
+        // Fast, small configuration for tests
+        config.num_workers = 2;
+        config.task_queue_size = 8;
+        config.heartbeat_interval_us = 10; // Very fast for test responsiveness
+        config.promotion_threshold = 5; // Lower threshold for faster promotion in tests
+        
+        return config;
+    }
+    
+    /// Create a profiling configuration optimized for performance analysis
+    pub fn createProfilingConfig() Config {
+        var config = Config{};
+        config.development_mode = true;
+        config.verbose_logging = false;
+        config.performance_validation = false; // Disable to avoid interference
+        config.scheduler_profiling = true;
+        config.task_tracing = false; // Disable to reduce overhead
+        config.enable_statistics = true;
+        
+        // Optimal performance settings for accurate profiling
+        // Use default optimized values from build_opts
+        return config;
+    }
+    
+    /// Apply development mode settings if enabled
+    pub fn applyDevelopmentMode(self: *Config) void {
+        if (self.development_mode) {
+            // Ensure debug features are enabled when in development mode
+            if (self.verbose_logging or self.task_tracing) {
+                self.enable_trace = true;
+            }
+            
+            if (self.memory_debugging or self.resource_leak_detection) {
+                self.enable_statistics = true;
+            }
+            
+            // Adjust settings for better debugging experience
+            if (self.deadlock_detection) {
+                // Shorter timeouts to detect issues faster
+                if (self.heartbeat_interval_us > 100) {
+                    self.heartbeat_interval_us = 100;
+                }
+            }
+        }
+    }
+    
+    /// Validate configuration and suggest improvements for development
+    pub fn validateDevelopmentConfig(self: *const Config, allocator: std.mem.Allocator) ![]const u8 {
+        var recommendations = std.ArrayList(u8).init(allocator);
+        var writer = recommendations.writer();
+        
+        if (self.development_mode) {
+            try writer.writeAll("Beat.zig Development Mode Configuration Analysis:\n\n");
+            
+            // Check for optimal development settings
+            if (!self.verbose_logging and (self.task_tracing or self.scheduler_profiling)) {
+                try writer.writeAll("⚠️  Recommendation: Enable verbose_logging for better debugging visibility\n");
+            }
+            
+            if (!self.enable_statistics and (self.memory_debugging or self.performance_validation)) {
+                try writer.writeAll("⚠️  Recommendation: Enable statistics for development features to work properly\n");
+            }
+            
+            if (self.num_workers != null and self.num_workers.? > 4) {
+                try writer.writeAll("⚠️  Recommendation: Use 2-4 workers in development mode for easier debugging\n");
+            }
+            
+            if (self.task_queue_size > 32) {
+                try writer.writeAll("⚠️  Recommendation: Use smaller queue size (8-16) in development for faster issue detection\n");
+            }
+            
+            // Positive confirmations
+            if (self.resource_leak_detection) {
+                try writer.writeAll("✅ Resource leak detection enabled - will catch memory/handle leaks\n");
+            }
+            
+            if (self.deadlock_detection) {
+                try writer.writeAll("✅ Deadlock detection enabled - will identify potential blocking issues\n");
+            }
+            
+            if (self.performance_validation) {
+                try writer.writeAll("✅ Performance validation enabled - will detect scheduling anomalies\n");
+            }
+            
+        } else {
+            try writer.writeAll("Beat.zig Production Configuration:\n");
+            try writer.writeAll("Development mode disabled - consider Config.createDevelopmentConfig() for debugging\n");
+        }
+        
+        return recommendations.toOwnedSlice();
+    }
 };
 
 // ============================================================================
@@ -238,25 +375,76 @@ pub const ThreadPool = struct {
     };
     
     pub fn init(allocator: std.mem.Allocator, input_config: Config) !*Self {
-        const self = try allocator.create(Self);
-        errdefer allocator.destroy(self);
+        // Enhanced configuration validation with helpful error messages
+        enhanced_errors.validateConfigurationWithHelp(input_config) catch |err| {
+            enhanced_errors.logEnhancedError(@TypeOf(err), err, "ThreadPool.init");
+            return err;
+        };
         
-        // Auto-detect configuration
+        // Detect configuration issues and provide guidance
+        enhanced_errors.detectAndReportConfigIssues(allocator);
+        
+        // Check if we're being used as a dependency and provide appropriate guidance
+        if (enhanced_errors.isUsedAsDependency()) {
+            std.log.info(
+                \\
+                \\ℹ️  Beat.zig detected as external dependency
+                \\💡 Consider using the Easy API for simpler integration:
+                \\   const pool = try beat.createBasicPool(allocator, 4);
+                \\📚 See: https://github.com/Beat-zig/Beat.zig/blob/main/INTEGRATION_GUIDE.md
+                \\
+            , .{});
+        }
+        
+        // Auto-detect configuration with enhanced error handling
         var actual_config = input_config;
         
-        // Detect topology if enabled
+        // Detect topology if enabled with enhanced error handling (before self allocation)
+        var detected_topology: ?topology.CpuTopology = null;
+        
         if (actual_config.enable_topology_aware) {
-            self.topology = topology.detectTopology(allocator) catch null;
-            if (self.topology) |topo| {
+            detected_topology = topology.detectTopology(allocator) catch |err| blk: {
+                std.log.warn(
+                    \\
+                    \\⚠️  Topology detection failed: {}
+                    \\💡 AUTOMATIC FALLBACK: Disabling topology-aware features
+                    \\🔧 TO FIX: Use basic configuration or disable topology awareness:
+                    \\   const config = beat.Config{{ .enable_topology_aware = false }};
+                    \\   OR use: beat.createBasicPool(allocator, workers);
+                    \\
+                , .{err});
+                
+                // Automatically disable topology features and continue
+                actual_config.enable_topology_aware = false;
+                actual_config.enable_numa_aware = false;
+                break :blk null;
+            };
+            
+            if (detected_topology) |topo| {
                 if (actual_config.num_workers == null) {
                     actual_config.num_workers = topo.physical_cores;
                 }
             }
         }
         
-        // Fallback worker count
+        // Fallback worker count with enhanced error reporting
         if (actual_config.num_workers == null) {
-            actual_config.num_workers = std.Thread.getCpuCount() catch 4;
+            actual_config.num_workers = std.Thread.getCpuCount() catch blk: {
+                enhanced_errors.logEnhancedError(
+                    enhanced_errors.ConfigError, 
+                    enhanced_errors.ConfigError.HardwareDetectionFailed, 
+                    "CPU count detection"
+                );
+                std.log.info("🔧 Using conservative fallback: 4 workers", .{});
+                break :blk 4;
+            };
+        }
+        
+        const self = try allocator.create(Self);
+        errdefer {
+            // If topology was detected, clean it up
+            if (detected_topology) |*topo| topo.deinit();
+            allocator.destroy(self);
         }
         
         self.* = .{
@@ -265,6 +453,7 @@ pub const ThreadPool = struct {
             .workers = try allocator.alloc(Worker, actual_config.num_workers.?),
             .running = std.atomic.Value(bool).init(true),
             .stats = .{},
+            .topology = detected_topology,
         };
         
         // Initialize optional subsystems
