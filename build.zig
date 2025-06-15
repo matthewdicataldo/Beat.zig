@@ -487,6 +487,19 @@ pub fn build(b: *std.Build) void {
     const simd_queue_operations_test_step = b.step("test-simd-queue", "Test SIMD vectorized queue operations and work-stealing integration");
     simd_queue_operations_test_step.dependOn(&run_simd_queue_operations_test.step);
     
+    // SIMD classification and batch formation test
+    const simd_classification_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_simd_classification.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    simd_classification_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, simd_classification_test, auto_config);
+    
+    const run_simd_classification_test = b.addRunArtifact(simd_classification_test);
+    const simd_classification_test_step = b.step("test-simd-classification", "Test SIMD task classification and intelligent batch formation system");
+    simd_classification_test_step.dependOn(&run_simd_classification_test.step);
+    
     // Advanced scheduling benchmark
     const advanced_scheduling_benchmark = b.addExecutable(.{
         .name = "benchmark_advanced_scheduling",
