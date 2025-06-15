@@ -459,4 +459,16 @@ pub fn build(b: *std.Build) void {
     const run_enhanced_one_euro_test = b.addRunArtifact(enhanced_one_euro_test);
     const enhanced_one_euro_test_step = b.step("test-enhanced-filter", "Test enhanced One Euro Filter implementation replacing simple averaging");
     enhanced_one_euro_test_step.dependOn(&run_enhanced_one_euro_test.step);
+    
+    // Advanced performance tracking test
+    const advanced_tracking_test = b.addTest(.{
+        .root_source_file = b.path("test_advanced_performance_tracking.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, advanced_tracking_test, auto_config);
+    
+    const run_advanced_tracking_test = b.addRunArtifact(advanced_tracking_test);
+    const advanced_tracking_test_step = b.step("test-advanced-tracking", "Test advanced performance tracking with nanosecond precision and velocity tracking");
+    advanced_tracking_test_step.dependOn(&run_advanced_tracking_test.step);
 }

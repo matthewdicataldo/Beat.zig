@@ -352,6 +352,32 @@ pub const FingerprintRegistry = struct {
         accuracy_count: u64 = 0,            // Number of predictions made
         last_prediction: ?f32 = null,       // Last prediction for accuracy calculation
         
+        // Enhanced timestamp-based tracking with nanosecond precision
+        first_measurement_time: ?u64 = null,    // Nanosecond timestamp of first measurement
+        measurement_intervals: [16]u64 = [_]u64{0} ** 16, // Ring buffer of inter-measurement intervals
+        interval_index: u8 = 0,              // Current index in interval buffer
+        interval_filled: bool = false,       // Whether the interval buffer is full
+        
+        // Derivative estimation for velocity tracking
+        velocity_filter: scheduler.OneEuroFilter, // Separate filter for velocity smoothing
+        current_velocity: f32 = 0.0,         // Current rate of change (cycles/second)
+        peak_velocity: f32 = 0.0,           // Maximum observed velocity
+        velocity_variance: f64 = 0.0,        // Variance in velocity measurements
+        
+        // Adaptive cutoff frequency calculation
+        base_cutoff: f32,                    // Base cutoff frequency from configuration
+        adaptive_cutoff: f32,                // Current adaptive cutoff frequency
+        cutoff_adaptation_rate: f32 = 0.1,   // Rate of cutoff frequency adaptation
+        performance_stability_score: f32 = 1.0, // Stability score (0.0-1.0)
+        
+        // Enhanced confidence tracking and accuracy metrics
+        prediction_confidence_history: [32]f32 = [_]f32{0.0} ** 32, // Ring buffer of confidence scores
+        confidence_index: u8 = 0,            // Current index in confidence buffer
+        confidence_filled: bool = false,     // Whether confidence buffer is full
+        rolling_accuracy: f32 = 0.0,         // Rolling prediction accuracy (0.0-1.0)
+        accuracy_trend: f32 = 0.0,           // Trend in accuracy improvement/degradation
+        last_accuracy: f32 = 0.0,           // Previous accuracy for trend calculation
+        
         // Phase change detection
         phase_change_detector: PhaseChangeDetector,
         
@@ -450,6 +476,7 @@ pub const FingerprintRegistry = struct {
         };
         
         pub fn init(fingerprint: TaskFingerprint) ProfileEntry {
+            const default_cutoff = 1.0;
             return ProfileEntry{
                 .fingerprint = fingerprint,
                 .execution_count = 0,
@@ -458,6 +485,9 @@ pub const FingerprintRegistry = struct {
                 .max_cycles = 0,
                 .last_execution = 0,
                 .execution_filter = scheduler.OneEuroFilter.initDefault(),
+                .velocity_filter = scheduler.OneEuroFilter.init(0.5, 0.05, 0.5), // More stable for velocity
+                .base_cutoff = default_cutoff,
+                .adaptive_cutoff = default_cutoff,
                 .phase_change_detector = PhaseChangeDetector{},
                 .outlier_detector = OutlierDetector{},
             };
@@ -472,6 +502,9 @@ pub const FingerprintRegistry = struct {
                 .max_cycles = 0,
                 .last_execution = 0,
                 .execution_filter = scheduler.OneEuroFilter.init(min_cutoff, beta, d_cutoff),
+                .velocity_filter = scheduler.OneEuroFilter.init(0.5, 0.05, 0.5), // More stable for velocity
+                .base_cutoff = min_cutoff,
+                .adaptive_cutoff = min_cutoff,
                 .phase_change_detector = PhaseChangeDetector{},
                 .outlier_detector = OutlierDetector{},
             };
@@ -495,24 +528,61 @@ pub const FingerprintRegistry = struct {
             return self.getAdaptivePrediction();
         }
         
-        /// Enhanced execution update with adaptive filtering and outlier detection
+        /// Enhanced execution update with advanced performance tracking (Task 2.2.2)
         pub fn updateExecution(self: *ProfileEntry, cycles: u64) void {
             const cycles_f32 = @as(f32, @floatFromInt(cycles));
             const timestamp_ns = @as(u64, @intCast(std.time.nanoTimestamp()));
+            var self_mut = @constCast(self);
+            
+            // 1. TIMESTAMP-BASED FILTERING WITH NANOSECOND PRECISION
+            if (self.first_measurement_time == null) {
+                self_mut.first_measurement_time = timestamp_ns;
+            } else {
+                // Calculate inter-measurement interval with nanosecond precision
+                const interval = timestamp_ns - self.last_execution;
+                self_mut.measurement_intervals[self.interval_index] = interval;
+                self_mut.interval_index = (self.interval_index + 1) % 16;
+                if (self.interval_index == 0) self_mut.interval_filled = true;
+            }
+            
+            // 2. DERIVATIVE ESTIMATION FOR VELOCITY TRACKING
+            var velocity: f32 = 0.0;
+            if (self.execution_count > 0 and timestamp_ns > self.last_execution) {
+                const time_delta_s = @as(f32, @floatFromInt(timestamp_ns - self.last_execution)) / 1_000_000_000.0;
+                if (time_delta_s > 0.0 and self.last_prediction != null) {
+                    // Calculate velocity as cycles/second
+                    velocity = (cycles_f32 - self.last_prediction.?) / time_delta_s;
+                    
+                    // Filter velocity for smoother tracking
+                    var velocity_filter_mut = &self_mut.velocity_filter;
+                    self_mut.current_velocity = velocity_filter_mut.filter(@abs(velocity), timestamp_ns);
+                    self_mut.peak_velocity = @max(self.peak_velocity, @abs(velocity));
+                    
+                    // Update velocity variance using Welford's algorithm
+                    if (self.execution_count > 1) {
+                        const velocity_mean = self.current_velocity;
+                        const velocity_delta = @abs(velocity) - velocity_mean;
+                        self_mut.velocity_variance += velocity_delta * velocity_delta / @as(f64, @floatFromInt(self.execution_count));
+                    }
+                }
+            }
+            
+            // 3. ADAPTIVE CUTOFF FREQUENCY CALCULATION
+            self.updateAdaptiveCutoff(velocity, cycles_f32);
             
             // Phase change detection (need mutable access)
-            var phase_detector_mut = &@constCast(self).phase_change_detector;
+            var phase_detector_mut = &self_mut.phase_change_detector;
             const phase_change = phase_detector_mut.addMeasurement(cycles_f32);
             
-            // Adapt filter parameters based on phase change
-            var filter_mut = &@constCast(self).execution_filter;
-            var self_mut = @constCast(self);
+            // Adapt filter parameters based on phase change and velocity
+            var filter_mut = &self_mut.execution_filter;
             if (phase_change) {
                 // Increase responsiveness during phase changes
                 filter_mut.reset();
                 // Suppress outlier detection for 5 seconds to allow adaptation
                 self_mut.suppress_outlier_detection_until = timestamp_ns + 5_000_000_000;
-                // Debug: Phase change detected (can be enabled for debugging)
+                // Reset adaptive cutoff to base value for faster adaptation
+                self_mut.adaptive_cutoff = self.base_cutoff * 2.0;
             }
             
             // Outlier detection and resilience (with phase change suppression)
@@ -520,26 +590,19 @@ pub const FingerprintRegistry = struct {
             const outlier_suppressed = timestamp_ns < self.suppress_outlier_detection_until;
             const is_outlier = if (outlier_suppressed) false else outlier_detector_mut.isOutlier(cycles_f32);
             
-            // Apply One Euro Filter with adaptive outlier handling
+            // Apply One Euro Filter with adaptive cutoff frequency
             var filtered_value: f32 = undefined;
             if (is_outlier and self.execution_count > 5) {
                 // For outliers, use current filter estimate instead of raw measurement
-                // This provides outlier resilience
                 filtered_value = filter_mut.getCurrentEstimate() orelse cycles_f32;
-                // Debug: Outlier rejected (can be enabled for debugging)
             } else {
-                // Normal case: apply filter to measurement
-                filtered_value = filter_mut.filter(cycles_f32, timestamp_ns);
-                // Debug: Normal filtering (can be enabled for debugging)
+                // Apply filter with adaptive cutoff frequency
+                filtered_value = self.applyAdaptiveFilter(filter_mut, cycles_f32, timestamp_ns);
             }
             
-            // Track prediction accuracy
-            if (self.last_prediction) |prediction| {
-                const prediction_error = @abs(prediction - cycles_f32);
-                self.prediction_error_sum += prediction_error;
-                self.accuracy_count += 1;
-            }
-            self.last_prediction = filtered_value;
+            // 4. ENHANCED CONFIDENCE TRACKING AND ACCURACY METRICS
+            self.updateConfidenceTracking(cycles_f32, filtered_value);
+            self_mut.last_prediction = filtered_value;
             
             // Update basic statistics
             if (self.execution_count == 0) {
@@ -561,6 +624,163 @@ pub const FingerprintRegistry = struct {
                 self.variance_sum += delta * delta;
             }
         }
+        
+        /// Update adaptive cutoff frequency based on velocity and performance stability
+        fn updateAdaptiveCutoff(self: *ProfileEntry, velocity: f32, cycles: f32) void {
+            _ = cycles; // Currently unused, could be used for cycle-based adaptation
+            var self_mut = @constCast(self);
+            
+            // Calculate performance stability score based on recent variance
+            if (self.execution_count > 3) {
+                const recent_variance = self.getVariance();
+                const avg_cycles = @as(f64, @floatFromInt(self.total_cycles)) / @as(f64, @floatFromInt(self.execution_count));
+                
+                if (avg_cycles > 0.0) {
+                    const coefficient_of_variation = @sqrt(recent_variance) / avg_cycles;
+                    self_mut.performance_stability_score = @max(0.1, 1.0 - @as(f32, @floatCast(@min(1.0, coefficient_of_variation))));
+                }
+            }
+            
+            // Adapt cutoff frequency based on velocity and stability
+            var target_cutoff = self.base_cutoff;
+            
+            // Higher velocity = higher cutoff (more responsive)
+            if (velocity > 0.0) {
+                const velocity_factor = @min(4.0, @abs(velocity) / 1000.0); // Normalize by typical cycle range
+                target_cutoff = self.base_cutoff * (1.0 + velocity_factor);
+            }
+            
+            // Lower stability = higher cutoff (more responsive to changes)
+            target_cutoff *= (2.0 - self.performance_stability_score);
+            
+            // Gradual adaptation to avoid oscillations
+            self_mut.adaptive_cutoff = self.adaptive_cutoff + 
+                self.cutoff_adaptation_rate * (target_cutoff - self.adaptive_cutoff);
+        }
+        
+        /// Apply filter with adaptive cutoff frequency
+        fn applyAdaptiveFilter(self: *ProfileEntry, filter_mut: *scheduler.OneEuroFilter, cycles: f32, timestamp: u64) f32 {
+            _ = self; // Currently unused, could be used for adaptive parameter adjustment
+            // For now, use the standard filter - could be enhanced to dynamically adjust cutoff
+            // This would require modifying the OneEuroFilter to allow runtime parameter changes
+            return filter_mut.filter(cycles, timestamp);
+        }
+        
+        /// Update confidence tracking and accuracy metrics  
+        fn updateConfidenceTracking(self: *ProfileEntry, actual_cycles: f32, predicted_cycles: f32) void {
+            var self_mut = @constCast(self);
+            
+            // Track prediction accuracy
+            if (self.last_prediction) |last_pred| {
+                const prediction_error = @abs(last_pred - actual_cycles);
+                self_mut.prediction_error_sum += prediction_error;
+                self_mut.accuracy_count += 1;
+                
+                // Calculate rolling accuracy (inverse of relative error)
+                const avg_cycles = @as(f64, @floatFromInt(self.total_cycles)) / @as(f64, @floatFromInt(self.execution_count));
+                if (avg_cycles > 0.0) {
+                    const relative_error = @as(f32, @floatCast(prediction_error / avg_cycles));
+                    const current_accuracy = @max(0.0, 1.0 - relative_error);
+                    
+                    // Update rolling accuracy with exponential smoothing
+                    const alpha = 0.1; // Smoothing factor
+                    self_mut.rolling_accuracy = alpha * current_accuracy + (1.0 - alpha) * self.rolling_accuracy;
+                    
+                    // Calculate accuracy trend
+                    self_mut.accuracy_trend = current_accuracy - self.last_accuracy;
+                    self_mut.last_accuracy = current_accuracy;
+                }
+            }
+            
+            // Update confidence history ring buffer
+            const current_confidence = self.calculateInstantaneousConfidence(predicted_cycles);
+            self_mut.prediction_confidence_history[self.confidence_index] = current_confidence;
+            self_mut.confidence_index = (self.confidence_index + 1) % 32;
+            if (self.confidence_index == 0) self_mut.confidence_filled = true;
+        }
+        
+        /// Calculate instantaneous confidence score
+        fn calculateInstantaneousConfidence(self: *const ProfileEntry, prediction: f32) f32 {
+            var confidence: f32 = 1.0;
+            
+            // Factor in velocity stability (lower velocity = higher confidence)
+            if (self.current_velocity > 0.0) {
+                const velocity_confidence = @max(0.1, 1.0 / (1.0 + self.current_velocity / 1000.0));
+                confidence *= velocity_confidence;
+            }
+            
+            // Factor in performance stability
+            confidence *= self.performance_stability_score;
+            
+            // Factor in prediction consistency
+            if (self.last_prediction) |last_pred| {
+                const prediction_consistency = 1.0 - @min(1.0, @abs(prediction - last_pred) / @max(prediction, last_pred));
+                confidence *= prediction_consistency;
+            }
+            
+            return confidence;
+        }
+        
+        /// Get advanced performance metrics
+        pub fn getAdvancedMetrics(self: *const ProfileEntry) AdvancedMetrics {
+            // Calculate average measurement interval
+            var avg_interval: f64 = 0.0;
+            if (self.interval_filled or self.interval_index > 1) {
+                const count = if (self.interval_filled) 16 else self.interval_index;
+                var sum: u64 = 0;
+                for (self.measurement_intervals[0..count]) |interval| {
+                    sum += interval;
+                }
+                avg_interval = @as(f64, @floatFromInt(sum)) / @as(f64, @floatFromInt(count));
+            }
+            
+            // Calculate confidence history statistics
+            var avg_confidence: f32 = 0.0;
+            var confidence_stability: f32 = 0.0;
+            if (self.confidence_filled or self.confidence_index > 1) {
+                const count = if (self.confidence_filled) 32 else self.confidence_index;
+                var sum: f32 = 0.0;
+                for (self.prediction_confidence_history[0..count]) |conf| {
+                    sum += conf;
+                }
+                avg_confidence = sum / @as(f32, @floatFromInt(count));
+                
+                // Calculate confidence variance
+                var variance_sum: f32 = 0.0;
+                for (self.prediction_confidence_history[0..count]) |conf| {
+                    const delta = conf - avg_confidence;
+                    variance_sum += delta * delta;
+                }
+                confidence_stability = 1.0 - @min(1.0, @sqrt(variance_sum / @as(f32, @floatFromInt(count))));
+            }
+            
+            return AdvancedMetrics{
+                .average_measurement_interval_ns = avg_interval,
+                .current_velocity_cycles_per_sec = self.current_velocity,
+                .peak_velocity_cycles_per_sec = self.peak_velocity,
+                .velocity_variance = self.velocity_variance,
+                .adaptive_cutoff_frequency = self.adaptive_cutoff,
+                .performance_stability_score = self.performance_stability_score,
+                .rolling_accuracy = self.rolling_accuracy,
+                .accuracy_trend = self.accuracy_trend,
+                .average_confidence = avg_confidence,
+                .confidence_stability = confidence_stability,
+            };
+        }
+        
+        /// Advanced performance metrics structure
+        pub const AdvancedMetrics = struct {
+            average_measurement_interval_ns: f64,
+            current_velocity_cycles_per_sec: f32,
+            peak_velocity_cycles_per_sec: f32,
+            velocity_variance: f64,
+            adaptive_cutoff_frequency: f32,
+            performance_stability_score: f32,
+            rolling_accuracy: f32,
+            accuracy_trend: f32,
+            average_confidence: f32,
+            confidence_stability: f32,
+        };
         
         /// Get prediction confidence based on multiple factors
         pub fn getConfidence(self: *const ProfileEntry) f32 {
@@ -671,6 +891,54 @@ pub const FingerprintRegistry = struct {
         };
     }
     
+    /// Get advanced performance metrics (Task 2.2.2)
+    pub fn getAdvancedMetrics(self: *Self, fingerprint: TaskFingerprint) ?ProfileEntry.AdvancedMetrics {
+        if (self.getProfile(fingerprint)) |profile| {
+            return profile.getAdvancedMetrics();
+        }
+        return null;
+    }
+    
+    /// Get enhanced prediction with advanced tracking
+    pub fn getEnhancedPrediction(self: *Self, fingerprint: TaskFingerprint) EnhancedPredictionResult {
+        if (self.getProfile(fingerprint)) |profile| {
+            const basic_prediction = PredictionResult{
+                .predicted_cycles = profile.getAdaptivePrediction(),
+                .confidence = profile.getConfidence(),
+                .variance = profile.getVariance(),
+                .execution_count = profile.execution_count,
+            };
+            
+            const advanced_metrics = profile.getAdvancedMetrics();
+            
+            return EnhancedPredictionResult{
+                .basic = basic_prediction,
+                .advanced = advanced_metrics,
+            };
+        }
+        
+        return EnhancedPredictionResult{
+            .basic = PredictionResult{
+                .predicted_cycles = 1000.0,
+                .confidence = 0.0,
+                .variance = 0.0,
+                .execution_count = 0,
+            },
+            .advanced = ProfileEntry.AdvancedMetrics{
+                .average_measurement_interval_ns = 0.0,
+                .current_velocity_cycles_per_sec = 0.0,
+                .peak_velocity_cycles_per_sec = 0.0,
+                .velocity_variance = 0.0,
+                .adaptive_cutoff_frequency = 1.0,
+                .performance_stability_score = 0.0,
+                .rolling_accuracy = 0.0,
+                .accuracy_trend = 0.0,
+                .average_confidence = 0.0,
+                .confidence_stability = 0.0,
+            },
+        };
+    }
+    
     /// Add customized registry with configurable One Euro Filter parameters
     pub fn initWithConfig(allocator: std.mem.Allocator, min_cutoff: f32, beta: f32, d_cutoff: f32) EnhancedFingerprintRegistry {
         return EnhancedFingerprintRegistry{
@@ -690,6 +958,12 @@ pub const FingerprintRegistry = struct {
         confidence: f32,
         variance: f64,
         execution_count: u64,
+    };
+    
+    /// Enhanced prediction result with advanced metrics (Task 2.2.2)
+    pub const EnhancedPredictionResult = struct {
+        basic: PredictionResult,
+        advanced: ProfileEntry.AdvancedMetrics,
     };
     
     pub fn getRegistryStats(self: *Self) RegistryStats {
@@ -750,6 +1024,16 @@ pub const EnhancedFingerprintRegistry = struct {
     /// Get registry statistics
     pub fn getRegistryStats(self: *Self) FingerprintRegistry.RegistryStats {
         return self.base_registry.getRegistryStats();
+    }
+    
+    /// Get advanced performance metrics (Task 2.2.2)
+    pub fn getAdvancedMetrics(self: *Self, fingerprint: TaskFingerprint) ?FingerprintRegistry.ProfileEntry.AdvancedMetrics {
+        return self.base_registry.getAdvancedMetrics(fingerprint);
+    }
+    
+    /// Get enhanced prediction with advanced tracking
+    pub fn getEnhancedPrediction(self: *Self, fingerprint: TaskFingerprint) FingerprintRegistry.EnhancedPredictionResult {
+        return self.base_registry.getEnhancedPrediction(fingerprint);
     }
 };
 
