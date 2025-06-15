@@ -56,6 +56,7 @@ zig build test-cpu
 - `src/scheduler.zig` - Heartbeat and predictive scheduling algorithms
 - `src/pcall.zig` - Zero-overhead potentially parallel calls
 - `src/coz.zig` - COZ profiler integration
+- `src/testing.zig` - Enhanced parallel testing framework with resource validation
 
 ### Bundle vs Modular Usage
 - **Bundle**: Single file import via `beat.zig` (convenience)
@@ -76,16 +77,20 @@ The bundle file re-exports all modules but requires the `src/` directory structu
 - Sub-nanosecond overhead for inline pcall execution
 - NUMA-aware memory allocation and thread affinity
 - Lock-free data structures with hazard pointer memory reclamation
+- One Euro Filter for adaptive task execution time prediction (superior to simple averaging)
+  - Handles variable workloads and phase changes
+  - Outlier resilient (cache misses, thermal throttling)
+  - Configurable parameters for different workload characteristics
 
 ## Development Notes
 
 ### Testing Strategy
-The project uses comprehensive testing including unit tests, integration tests, stress tests, and specialized tests for TLS overflow conditions and COZ profiling scenarios.
+The project uses comprehensive testing including unit tests, integration tests, stress tests, and specialized tests for TLS overflow conditions and COZ profiling scenarios. The enhanced parallel testing framework (`src/testing.zig`) provides utilities for testing parallel code with automatic resource cleanup validation, performance constraints, and stress testing capabilities.
 
 ### Version Evolution
 - **V1**: Basic work-stealing thread pool
 - **V2**: Added heartbeat scheduling with token accounting
-- **V3**: CPU topology awareness, NUMA optimization, formal verification planning
+- **V3**: CPU topology awareness, NUMA optimization, One Euro Filter prediction, formal verification planning
 
 ### Formal Verification
 The project is working towards formal verification using Lean 4 theorem prover with LLM-assisted proof development for mathematical correctness guarantees of lock-free algorithms.

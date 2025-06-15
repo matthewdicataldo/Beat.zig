@@ -45,7 +45,12 @@ pub const Config = struct {
     enable_topology_aware: bool = true,      // CPU topology awareness
     enable_numa_aware: bool = true,          // NUMA-aware allocation
     enable_lock_free: bool = true,          // Lock-free data structures
-    enable_predictive: bool = false,         // Predictive scheduling (TODO)
+    enable_predictive: bool = true,          // Predictive scheduling with One Euro Filter
+    
+    // One Euro Filter parameters for task execution prediction
+    prediction_min_cutoff: f32 = 1.0,       // Minimum cutoff frequency (Hz)
+    prediction_beta: f32 = 0.1,              // Speed coefficient for adaptation
+    prediction_d_cutoff: f32 = 1.0,          // Derivative cutoff frequency
     
     // Performance tuning
     task_queue_size: u32 = 1024,            // Per-worker queue size

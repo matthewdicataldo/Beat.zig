@@ -9,7 +9,9 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(grep:*)",
       "Bash(zig test:*)",
-      "Bash(zig build:*)"
+      "Bash(zig build:*)",
+      "WebFetch(domain:gery.casiez.net)",
+      "WebFetch(domain:jaantollander.com)"
     ],
     "deny": []
   }
