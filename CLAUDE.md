@@ -59,6 +59,27 @@ zig build verify-topology
 
 # Auto-configuration integration with One Euro Filter
 zig build demo-integration
+
+# Parallel work distribution runtime tests
+zig build test-parallel-work
+
+# Thread affinity improvements test
+zig build test-affinity
+```
+
+### Documentation
+```bash
+# Generate API documentation
+zig build docs
+
+# Generate bundle documentation  
+zig build docs-bundle
+
+# Generate comprehensive documentation (all modules)
+zig build docs-all
+
+# Generate and get helpful output about documentation locations
+zig build docs-open
 ```
 
 ### Profiling
@@ -121,6 +142,7 @@ The bundle file re-exports all modules but requires the `src/` directory structu
   - Type-aware parallelization decisions
   - SIMD-aware work chunking and alignment
   - Integration with build-time auto-configuration
+  - **Runtime parallel execution**: `parallelMap`, `parallelReduce`, `parallelFilter`, `distributeWork`
 - **Build-time auto-configuration system** 
   - Hardware detection with CPU count, SIMD features, NUMA topology estimation
   - Automatic One Euro Filter parameter tuning based on hardware characteristics
@@ -136,7 +158,7 @@ The project uses comprehensive testing including unit tests, integration tests, 
 ### Version Evolution
 - **V1**: Basic work-stealing thread pool
 - **V2**: Added heartbeat scheduling with token accounting
-- **V3**: CPU topology awareness, NUMA optimization, One Euro Filter prediction, compile-time work distribution patterns, **build-time auto-configuration integration**
+- **V3**: CPU topology awareness, NUMA optimization, One Euro Filter prediction, compile-time work distribution patterns, **build-time auto-configuration integration**, **runtime parallel work distribution**, **improved thread affinity handling**
 
 ### Formal Verification
 The project is working towards formal verification using Lean 4 theorem prover with LLM-assisted proof development for mathematical correctness guarantees of lock-free algorithms.

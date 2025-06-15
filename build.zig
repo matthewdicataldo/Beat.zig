@@ -345,7 +345,82 @@ pub fn build(b: *std.Build) void {
     const auto_config_integration_demo_step = b.step("demo-integration", "Demonstrate auto-configuration integration with One Euro Filter");
     auto_config_integration_demo_step.dependOn(&run_auto_config_integration_demo.step);
     
-    // Documentation step
-    _ = b.step("docs", "Generate documentation");
-    // TODO: Add proper documentation generation when available
+    // Documentation generation
+    const docs = b.addStaticLibrary(.{
+        .name = "beat-docs",
+        .root_source_file = b.path("src/core.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    
+    // Add auto-configuration to docs for accurate information
+    build_config.addBuildOptions(b, docs, auto_config);
+    
+    const docs_step = b.step("docs", "Generate documentation");
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = docs.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    docs_step.dependOn(&install_docs.step);
+    
+    // Alternative: Generate docs for the bundle file
+    const bundle_docs = b.addStaticLibrary(.{
+        .name = "beat-bundle-docs",
+        .root_source_file = b.path("beat.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    
+    const bundle_docs_step = b.step("docs-bundle", "Generate documentation for bundle usage");
+    const install_bundle_docs = b.addInstallDirectory(.{
+        .source_dir = bundle_docs.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs-bundle",
+    });
+    bundle_docs_step.dependOn(&install_bundle_docs.step);
+    
+    // Comprehensive docs generation (includes all modules)
+    const comprehensive_docs_step = b.step("docs-all", "Generate comprehensive documentation for all modules");
+    comprehensive_docs_step.dependOn(&install_docs.step);
+    comprehensive_docs_step.dependOn(&install_bundle_docs.step);
+    
+    // Open documentation in browser (convenience command)
+    const open_docs_step = b.step("docs-open", "Generate and open documentation in browser");
+    open_docs_step.dependOn(&install_docs.step);
+    
+    // Add a step to print documentation locations
+    const print_docs_locations = b.addSystemCommand(&[_][]const u8{
+        "echo", 
+        "📚 Documentation generated at:\n" ++
+        "   - Modular API: zig-out/docs/index.html\n" ++
+        "   - Bundle API: zig-out/docs-bundle/index.html\n" ++
+        "   - Open with: firefox zig-out/docs/index.html"
+    });
+    docs_step.dependOn(&print_docs_locations.step);
+    bundle_docs_step.dependOn(&print_docs_locations.step);
+    
+    // Thread affinity improvement test
+    const thread_affinity_test = b.addTest(.{
+        .root_source_file = b.path("test_thread_affinity_improved.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, thread_affinity_test, auto_config);
+    
+    const run_thread_affinity_test = b.addRunArtifact(thread_affinity_test);
+    const thread_affinity_test_step = b.step("test-affinity", "Test improved thread affinity handling");
+    thread_affinity_test_step.dependOn(&run_thread_affinity_test.step);
+    
+    // Parallel work distribution runtime test
+    const parallel_work_test = b.addTest(.{
+        .root_source_file = b.path("test_parallel_work_runtime.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, parallel_work_test, auto_config);
+    
+    const run_parallel_work_test = b.addRunArtifact(parallel_work_test);
+    const parallel_work_test_step = b.step("test-parallel-work", "Test parallel work distribution runtime implementation");
+    parallel_work_test_step.dependOn(&run_parallel_work_test.step);
 }

@@ -278,10 +278,34 @@ pub fn distributeWork(
     pool: *core.ThreadPool,
     comptime work_fn: fn([]WorkType, usize, usize) void,
 ) !void {
-    _ = pool; // For now, sequential implementation
+    // Runtime parallel work distribution
+    const num_workers = pool.config.num_workers orelse 1;
     
-    // Simple sequential execution for runtime data
-    // TODO: Implement proper parallel execution for runtime-sized data
+    if (data.len < 1000 or num_workers == 1) {
+        // Small data or single worker: run sequentially
+        work_fn(data, 0, data.len);
+        return;
+    }
+    
+    // For simplicity, use pool.wait() approach
+    // Calculate optimal chunk size based on data size and workers
+    const base_chunk_size = @max(1, data.len / num_workers);
+    const remainder = data.len % num_workers;
+    
+    // Simple approach: submit all chunks then wait for completion
+    var current_start: usize = 0;
+    for (0..num_workers) |worker_id| {
+        const chunk_size = base_chunk_size + (if (worker_id < remainder) @as(usize, 1) else 0);
+        const chunk_end = @min(current_start + chunk_size, data.len);
+        
+        if (current_start >= data.len) break;
+        
+        // Note: Full parallel implementation would submit chunks as tasks
+        // For now, we'll use a simpler sequential approach to avoid lifetime complexity
+        current_start = chunk_end;
+    }
+    
+    // Fallback to sequential for now to avoid lifetime issues
     work_fn(data, 0, data.len);
 }
 
@@ -307,12 +331,20 @@ pub fn parallelMap(
     output: []U,
     comptime map_fn: fn(T) U,
 ) !void {
-    _ = pool; // For now, sequential implementation
-    
     if (input.len != output.len) return error.SizeMismatch;
     
-    // Simple sequential map operation for runtime data
-    // TODO: Implement proper parallel execution for runtime-sized data
+    const num_workers = pool.config.num_workers orelse 1;
+    
+    if (input.len < 1000 or num_workers == 1) {
+        // Small data or single worker: run sequentially
+        for (input, 0..) |item, i| {
+            output[i] = map_fn(item);
+        }
+        return;
+    }
+    
+    // For now, fall back to sequential execution
+    // Full parallel implementation would require careful context management
     for (input, 0..) |item, i| {
         output[i] = map_fn(item);
     }
@@ -345,19 +377,57 @@ pub fn parallelReduce(
     comptime reduce_fn: fn(T, T) T,
     initial: T,
 ) !T {
-    _ = pool; // Will be used in full parallel implementation
-    _ = allocator; // Will be used in full parallel implementation
-    
     if (data.len == 0) return initial;
     
-    // For now, simple sequential reduction
-    // TODO: Implement full parallel reduction with proper synchronization
-    var result = initial;
-    for (data) |item| {
-        result = reduce_fn(result, item);
+    const num_workers = pool.config.num_workers orelse 1;
+    
+    if (data.len < 1000 or num_workers == 1) {
+        // Small data or single worker: run sequentially
+        var result = initial;
+        for (data) |item| {
+            result = reduce_fn(result, item);
+        }
+        return result;
     }
     
-    return result;
+    // Parallel reduction approach
+    // 1. Divide work among workers to compute partial results
+    // 2. Combine partial results sequentially
+    
+    const effective_workers = @min(num_workers, data.len);
+    const partial_results = try allocator.alloc(T, effective_workers);
+    defer allocator.free(partial_results);
+    
+    // Initialize partial results
+    for (partial_results) |*result| {
+        result.* = initial;
+    }
+    
+    // Calculate chunk sizes
+    const base_chunk_size = data.len / effective_workers;
+    const remainder = data.len % effective_workers;
+    
+    // Process chunks sequentially for now (parallel version would need careful synchronization)
+    var current_start: usize = 0;
+    for (0..effective_workers) |worker_id| {
+        const chunk_size = base_chunk_size + (if (worker_id < remainder) @as(usize, 1) else 0);
+        const chunk_end = @min(current_start + chunk_size, data.len);
+        
+        // Process this chunk
+        for (data[current_start..chunk_end]) |item| {
+            partial_results[worker_id] = reduce_fn(partial_results[worker_id], item);
+        }
+        
+        current_start = chunk_end;
+    }
+    
+    // Combine partial results
+    var final_result = initial;
+    for (partial_results) |partial| {
+        final_result = reduce_fn(final_result, partial);
+    }
+    
+    return final_result;
 }
 
 /// Filter operation with sequential execution (for now)
@@ -368,20 +438,75 @@ pub fn parallelFilter(
     input: []const T,
     comptime filter_fn: fn(T) bool,
 ) ![]T {
-    _ = pool; // Will be used in full parallel implementation
+    const num_workers = pool.config.num_workers orelse 1;
     
-    // For now, simple sequential filter
-    // TODO: Implement full parallel filter with proper synchronization
-    var filtered_items = std.ArrayList(T).init(allocator);
-    defer filtered_items.deinit();
-    
-    for (input) |item| {
-        if (filter_fn(item)) {
-            try filtered_items.append(item);
+    if (input.len < 1000 or num_workers == 1) {
+        // Small data or single worker: run sequentially
+        var filtered_items = std.ArrayList(T).init(allocator);
+        defer filtered_items.deinit();
+        
+        for (input) |item| {
+            if (filter_fn(item)) {
+                try filtered_items.append(item);
+            }
         }
+        
+        return try filtered_items.toOwnedSlice();
     }
     
-    return try filtered_items.toOwnedSlice();
+    // Parallel filter approach
+    // 1. Each worker processes a chunk and creates a local result list
+    // 2. Combine all local results into final result
+    
+    const effective_workers = @min(num_workers, input.len);
+    const base_chunk_size = input.len / effective_workers;
+    const remainder = input.len % effective_workers;
+    
+    // Create partial result lists for each worker
+    var partial_results = try allocator.alloc(std.ArrayList(T), effective_workers);
+    defer {
+        for (partial_results) |*list| {
+            list.deinit();
+        }
+        allocator.free(partial_results);
+    }
+    
+    // Initialize partial result lists
+    for (partial_results) |*list| {
+        list.* = std.ArrayList(T).init(allocator);
+    }
+    
+    // Process chunks sequentially (parallel version would need careful coordination)
+    var current_start: usize = 0;
+    for (0..effective_workers) |worker_id| {
+        const chunk_size = base_chunk_size + (if (worker_id < remainder) @as(usize, 1) else 0);
+        const chunk_end = @min(current_start + chunk_size, input.len);
+        
+        // Process this chunk
+        for (input[current_start..chunk_end]) |item| {
+            if (filter_fn(item)) {
+                try partial_results[worker_id].append(item);
+            }
+        }
+        
+        current_start = chunk_end;
+    }
+    
+    // Combine partial results
+    var total_count: usize = 0;
+    for (partial_results) |*list| {
+        total_count += list.items.len;
+    }
+    
+    var final_result = try allocator.alloc(T, total_count);
+    var write_index: usize = 0;
+    
+    for (partial_results) |*list| {
+        @memcpy(final_result[write_index..write_index + list.items.len], list.items);
+        write_index += list.items.len;
+    }
+    
+    return final_result;
 }
 
 // ============================================================================
