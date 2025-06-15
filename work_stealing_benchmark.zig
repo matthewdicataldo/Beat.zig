@@ -52,9 +52,9 @@ pub fn main() !void {
         const avg_time_per_task = total_time / 1000;
         
         // Get statistics
-        const submitted = pool.stats.tasks_submitted.load(.monotonic);
-        const completed = pool.stats.tasks_completed.load(.monotonic);
-        const fast_path = pool.stats.fast_path_executions.load(.monotonic);
+        const submitted = pool.stats.hot.tasks_submitted.load(.monotonic);
+        const completed = pool.stats.cold.tasks_completed.load(.monotonic);
+        const fast_path = pool.stats.hot.fast_path_executions.load(.monotonic);
         const work_stealing_efficiency = pool.stats.getWorkStealingEfficiency();
         
         std.debug.print("  Total time: {:.2} ms\n", .{@as(f64, @floatFromInt(total_time)) / 1_000_000.0});
@@ -125,9 +125,9 @@ pub fn main() !void {
         const avg_time_per_task = total_time / 100;
         
         // Get statistics
-        const submitted = pool.stats.tasks_submitted.load(.monotonic);
-        const completed = pool.stats.tasks_completed.load(.monotonic);
-        const fast_path = pool.stats.fast_path_executions.load(.monotonic);
+        const submitted = pool.stats.hot.tasks_submitted.load(.monotonic);
+        const completed = pool.stats.cold.tasks_completed.load(.monotonic);
+        const fast_path = pool.stats.hot.fast_path_executions.load(.monotonic);
         const work_stealing_efficiency = pool.stats.getWorkStealingEfficiency();
         
         std.debug.print("  Total time: {:.2} ms\n", .{@as(f64, @floatFromInt(total_time)) / 1_000_000.0});
@@ -207,9 +207,9 @@ pub fn main() !void {
         const avg_time_per_task = total_time / 550; // 500 + 50 tasks
         
         // Get statistics
-        const submitted = pool.stats.tasks_submitted.load(.monotonic);
-        const completed = pool.stats.tasks_completed.load(.monotonic);
-        const fast_path = pool.stats.fast_path_executions.load(.monotonic);
+        const submitted = pool.stats.hot.tasks_submitted.load(.monotonic);
+        const completed = pool.stats.cold.tasks_completed.load(.monotonic);
+        const fast_path = pool.stats.hot.fast_path_executions.load(.monotonic);
         const work_stealing_efficiency = pool.stats.getWorkStealingEfficiency();
         
         std.debug.print("  Total time: {:.2} ms\n", .{@as(f64, @floatFromInt(total_time)) / 1_000_000.0});
