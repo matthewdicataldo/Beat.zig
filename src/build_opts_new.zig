@@ -56,6 +56,20 @@ pub const performance = struct {
     pub const enable_numa_aware: bool = config_resolver.perf.enable_numa_optimization;
 };
 
+/// GPU/SYCL configuration - auto-detected at build time
+pub const gpu = struct {
+    pub const sycl_available: bool = config_resolver.gpu.sycl_available;
+    pub const enable_gpu_integration: bool = config_resolver.gpu.enable_integration;
+    pub const sycl_implementation: ?[]const u8 = config_resolver.gpu.implementation;
+    
+    /// Check if GPU acceleration should be enabled
+    pub const should_enable: bool = sycl_available and enable_gpu_integration;
+    
+    /// GPU memory optimization hints
+    pub const enable_unified_memory: bool = sycl_available;
+    pub const prefer_device_memory: bool = enable_gpu_integration;
+};
+
 /// Build configuration information
 pub const build_info = struct {
     pub const is_debug: bool = std.debug.runtime_safety;

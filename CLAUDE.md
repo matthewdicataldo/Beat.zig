@@ -48,6 +48,11 @@ zig build test-simd-batch
 zig build test-simd-queue
 zig build test-simd-classification
 zig build test-simd-benchmark
+
+# GPU integration tests
+zig build test-gpu-integration
+zig build test-gpu-classifier
+zig build test-sycl-detection
 ```
 
 ### Demos
@@ -120,8 +125,17 @@ zig build docs-open
 - `src/intelligent_decision.zig` - Multi-criteria worker selection and decision making
 - `src/predictive_accounting.zig` - One Euro Filter-based execution time prediction
 - `src/advanced_worker_selection.zig` - Optimized worker selection algorithms
+- `src/simd.zig` - Cross-platform SIMD support and feature detection
+- `src/simd_classifier.zig` - Advanced SIMD task classification and batch formation
+- `src/gpu_integration.zig` - SYCL GPU integration and device management
+- `src/gpu_classifier.zig` - Automatic GPU suitability detection and task routing
+- `src/simd_batch.zig` - SIMD task batching architecture with type-safe vectorization
+- `src/simd_queue.zig` - Vectorized queue operations and work-stealing integration
 - `build_config.zig` - Build-time hardware detection and auto-configuration system
 - `src/build_opts_new.zig` - Enhanced compile-time access to auto-detected system configuration
+- `src/simd_benchmark.zig` - Comprehensive SIMD benchmarking and validation framework
+- `src/sycl_wrapper.hpp/cpp` - SYCL C++ to C API wrapper with opaque pointer management
+- `src/mock_sycl.zig` - Mock SYCL implementation for testing when runtime unavailable
 
 ### Bundle vs Modular Usage
 - **Bundle**: Single file import via `beat.zig` (convenience)
@@ -188,6 +202,19 @@ The bundle file re-exports all modules but requires the `src/` directory structu
   - Specialized configurations: testing, profiling, custom development pools
   - Configuration analysis and validation with optimization recommendations
   - Enhanced Easy API with development-focused pool creation functions
+- **SIMD task processing system** with intelligent classification and adaptive batch formation
+  - Cross-platform SIMD capability detection (SSE, AVX, AVX2, AVX-512, NEON, SVE)
+  - Multi-layered task classification (static analysis, dynamic profiling, ML, batch formation)
+  - Intelligent batch formation with multi-criteria optimization
+  - Comprehensive benchmarking and validation framework
+  - **VERIFIED**: Cross-platform compatibility and performance improvements
+- **GPU integration foundation** with SYCL C++ wrapper
+  - Extern "C" interface with opaque pointer management for C++ objects
+  - Exception handling and error code translation
+  - Device discovery, capability analysis, and performance scoring
+  - Task classification for optimal GPU routing decisions
+  - Memory management interface and fallback mechanisms
+  - **VERIFIED**: Seamless integration with graceful fallback when GPU unavailable
 
 ## Development Notes
 
@@ -199,7 +226,7 @@ The project uses comprehensive testing including unit tests, integration tests, 
 - **V2**: Added heartbeat scheduling with token accounting
 - **V3**: CPU topology awareness, NUMA optimization, One Euro Filter prediction, formal verification planning
 - **V3.0**: Advanced predictive scheduling with 15.3x worker selection optimization and memory-safe caching
-- **V3.0.1**: **Memory-aware task scheduling**, **development mode configuration**, **progressive feature adoption API**, **enhanced error handling**, **comprehensive debugging features**
+- **V3.0.1**: **Memory-aware task scheduling**, **development mode configuration**, **progressive feature adoption API**, **enhanced error handling**, **comprehensive debugging features**, **SIMD task processing**, **GPU integration foundation**
 
 ### Formal Verification
 The project is working towards formal verification using Lean 4 theorem prover with LLM-assisted proof development for mathematical correctness guarantees of lock-free algorithms.

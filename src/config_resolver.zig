@@ -63,6 +63,12 @@ const FallbackConfig = struct {
         pub const enable_numa_optimization: bool = false;
         pub const enable_simd: bool = false;
     };
+    
+    pub const gpu = struct {
+        pub const sycl_available: bool = false;
+        pub const enable_integration: bool = false;
+        pub const implementation: ?[]const u8 = null;
+    };
 };
 
 /// Runtime-detected configuration using available Zig standard library functions
@@ -119,6 +125,13 @@ const RuntimeDetectedConfig = struct {
         pub const optimal_queue_size: u32 = RuntimeDetectedConfig.hardware.optimal_workers * 64;
         pub const enable_numa_optimization: bool = RuntimeDetectedConfig.hardware.numa_nodes > 1;
         pub const enable_simd: bool = RuntimeDetectedConfig.hardware.has_avx2 or RuntimeDetectedConfig.hardware.has_avx512 or RuntimeDetectedConfig.hardware.has_neon;
+    };
+    
+    pub const gpu = struct {
+        // Runtime GPU detection is limited, conservative defaults
+        pub const sycl_available: bool = false;
+        pub const enable_integration: bool = false;
+        pub const implementation: ?[]const u8 = null;
     };
 };
 
