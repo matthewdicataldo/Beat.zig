@@ -498,7 +498,8 @@ pub const ThreadPool = struct {
             self.advanced_selector.?.setComponents(
                 self.fingerprint_registry,
                 null, // Predictive scheduler will be set later if available
-                self.decision_framework
+                self.decision_framework,
+                null  // SIMD registry not available yet
             );
         }
         
