@@ -40,6 +40,15 @@ zig build test-coz-conditions
 zig build test-cpu
 ```
 
+### Demos
+```bash
+# Auto-configuration system demo
+zig build demo-config
+
+# Comptime work distribution patterns demo
+zig build demo-comptime
+```
+
 ### Profiling
 ```bash
 # COZ profiler (requires coz to be installed)
@@ -57,6 +66,7 @@ zig build test-cpu
 - `src/pcall.zig` - Zero-overhead potentially parallel calls
 - `src/coz.zig` - COZ profiler integration
 - `src/testing.zig` - Enhanced parallel testing framework with resource validation
+- `src/comptime_work.zig` - Compile-time work distribution patterns and optimization
 
 ### Bundle vs Modular Usage
 - **Bundle**: Single file import via `beat.zig` (convenience)
@@ -81,6 +91,11 @@ The bundle file re-exports all modules but requires the `src/` directory structu
   - Handles variable workloads and phase changes
   - Outlier resilient (cache misses, thermal throttling)
   - Configurable parameters for different workload characteristics
+- Compile-time work distribution patterns with zero runtime overhead
+  - Automatic strategy selection based on work characteristics
+  - Type-aware parallelization decisions
+  - SIMD-aware work chunking and alignment
+  - Integration with build-time auto-configuration
 
 ## Development Notes
 
@@ -90,7 +105,7 @@ The project uses comprehensive testing including unit tests, integration tests, 
 ### Version Evolution
 - **V1**: Basic work-stealing thread pool
 - **V2**: Added heartbeat scheduling with token accounting
-- **V3**: CPU topology awareness, NUMA optimization, One Euro Filter prediction, formal verification planning
+- **V3**: CPU topology awareness, NUMA optimization, One Euro Filter prediction, compile-time work distribution patterns
 
 ### Formal Verification
 The project is working towards formal verification using Lean 4 theorem prover with LLM-assisted proof development for mathematical correctness guarantees of lock-free algorithms.

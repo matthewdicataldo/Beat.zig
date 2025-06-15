@@ -360,16 +360,104 @@ pub const ThreadPool = struct {
     }
     
     fn selectWorker(self: *Self, task: Task) usize {
-        _ = task; // TODO: Use task affinity hint
-        // TODO: Implement smart selection based on:
-        // - Task affinity hint
-        // - Current queue lengths
-        // - NUMA topology
-        // - Load balancing
+        // Smart worker selection considering multiple factors
         
-        // For now, simple round-robin
-        const count = self.stats.tasks_submitted.load(.acquire);
-        return count % self.workers.len;
+        // 1. Honor explicit affinity hint if provided
+        if (task.affinity_hint) |numa_node| {
+            if (self.topology) |topo| {
+                return self.selectWorkerOnNumaNode(topo, numa_node);
+            }
+        }
+        
+        // 2. Find worker with lightest load, preferring local NUMA node
+        if (self.topology) |topo| {
+            return self.selectWorkerWithLoadBalancing(topo);
+        }
+        
+        // 3. Fallback to simple load balancing without topology
+        return self.selectLightestWorker();
+    }
+    
+    fn selectWorkerOnNumaNode(self: *Self, topo: topology.CpuTopology, numa_node: u32) usize {
+        _ = topo; // May be used for validation in the future
+        var best_worker: usize = 0;
+        var min_queue_size: usize = std.math.maxInt(usize);
+        
+        // Find the worker on the specified NUMA node with the smallest queue
+        for (self.workers, 0..) |*worker, i| {
+            if (worker.numa_node == numa_node) {
+                const queue_size = self.getWorkerQueueSize(i);
+                if (queue_size < min_queue_size) {
+                    min_queue_size = queue_size;
+                    best_worker = i;
+                }
+            }
+        }
+        
+        // If no worker found on the specified node, fall back to any node
+        if (min_queue_size == std.math.maxInt(usize)) {
+            return self.selectLightestWorker();
+        }
+        
+        return best_worker;
+    }
+    
+    fn selectWorkerWithLoadBalancing(self: *Self, topo: topology.CpuTopology) usize {
+        // Use a simple round-robin to distribute across NUMA nodes initially
+        // This could be enhanced with actual CPU detection in the future
+        const submission_count = self.stats.tasks_submitted.load(.acquire);
+        const preferred_numa = @as(u32, @intCast(submission_count % topo.numa_nodes.len));
+        
+        var best_worker: usize = 0;
+        var min_queue_size: usize = std.math.maxInt(usize);
+        var found_on_preferred_numa = false;
+        
+        // First pass: prefer workers on the same NUMA node
+        for (self.workers, 0..) |*worker, i| {
+            const queue_size = self.getWorkerQueueSize(i);
+            
+            if (worker.numa_node == preferred_numa) {
+                if (!found_on_preferred_numa or queue_size < min_queue_size) {
+                    min_queue_size = queue_size;
+                    best_worker = i;
+                    found_on_preferred_numa = true;
+                }
+            } else if (!found_on_preferred_numa and queue_size < min_queue_size) {
+                // Only consider other NUMA nodes if we haven't found a good local option
+                min_queue_size = queue_size;
+                best_worker = i;
+            }
+        }
+        
+        return best_worker;
+    }
+    
+    fn selectLightestWorker(self: *Self) usize {
+        var best_worker: usize = 0;
+        var min_queue_size: usize = std.math.maxInt(usize);
+        
+        for (self.workers, 0..) |_, i| {
+            const queue_size = self.getWorkerQueueSize(i);
+            if (queue_size < min_queue_size) {
+                min_queue_size = queue_size;
+                best_worker = i;
+            }
+        }
+        
+        return best_worker;
+    }
+    
+    fn getWorkerQueueSize(self: *Self, worker_id: usize) usize {
+        const worker = &self.workers[worker_id];
+        
+        return switch (worker.queue) {
+            .mutex => |*q| blk: {
+                q.mutex.lock();
+                defer q.mutex.unlock();
+                break :blk q.tasks[0].items.len + q.tasks[1].items.len + q.tasks[2].items.len;
+            },
+            .lockfree => |*q| q.size(),
+        };
     }
     
     const WorkerConfig = struct {

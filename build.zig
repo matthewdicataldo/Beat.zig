@@ -258,6 +258,18 @@ pub fn build(b: *std.Build) void {
     const comptime_work_demo_step = b.step("demo-comptime", "Run comptime work distribution demo");
     comptime_work_demo_step.dependOn(&run_comptime_work_demo.step);
     
+    // Smart worker selection test
+    const smart_worker_test = b.addTest(.{
+        .root_source_file = b.path("test_smart_worker_selection.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, smart_worker_test, auto_config);
+    
+    const run_smart_worker_test = b.addRunArtifact(smart_worker_test);
+    const smart_worker_test_step = b.step("test-smart-worker", "Test smart worker selection");
+    smart_worker_test_step.dependOn(&run_smart_worker_test.step);
+    
     // Documentation step
     _ = b.step("docs", "Generate documentation");
     // TODO: Add proper documentation generation when available
