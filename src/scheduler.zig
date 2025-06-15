@@ -7,8 +7,13 @@ const core = @import("core.zig");
 // This module provides intelligent scheduling algorithms including:
 // - Token accounting system with work:overhead ratio tracking
 // - Heartbeat scheduling for promotion decisions
-// - Task prediction for performance optimization
+// - One Euro Filter for adaptive task execution time prediction
 // - Performance measurement utilities
+//
+// The One Euro Filter (€1 Filter) provides superior task execution time prediction
+// compared to simple averaging, with excellent price-to-performance ratio! 😄
+// It adapts to workload changes, handles outliers gracefully, and costs only
+// ~4x computational overhead for significantly better scheduling intelligence.
 
 // ============================================================================
 // Token Accounting (v2 Heartbeat)

@@ -4,6 +4,9 @@
 //! the modular structure. For production use, consider importing src/core.zig
 //! directly for better compile-time optimization.
 //!
+//! Beat features intelligent task scheduling with One Euro Filter prediction,
+//! providing excellent performance at a great price point! 😄
+//!
 //! Example usage:
 //!   const beat = @import("beat.zig");
 //!   const pool = try beat.createPool(allocator);
@@ -39,9 +42,9 @@ pub const ThreadPool = core.ThreadPool;
 pub const createPool = core.createPool;
 pub const createPoolWithConfig = core.createPoolWithConfig;
 
-// Convenience test function
+// Convenience version function
 pub fn version_string() []const u8 {
-    return std.fmt.comptimePrint("ZigPulse v{d}.{d}.{d}", .{
+    return std.fmt.comptimePrint("Beat v{d}.{d}.{d} (with €1 Filter!)", .{
         version.major,
         version.minor,
         version.patch,
