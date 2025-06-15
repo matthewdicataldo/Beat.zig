@@ -15,6 +15,7 @@ pub const TokenAccount = struct {
     min_work_cycles: u64,
     should_promote_cached: bool = false,
     last_check_cycles: u64 = 0,
+    first_update_done: bool = false,
     
     const CHECK_INTERVAL = 1000;
     
@@ -29,9 +30,15 @@ pub const TokenAccount = struct {
         self.work_cycles +%= work;
         self.overhead_cycles +%= overhead;
         
-        if (self.overhead_cycles -% self.last_check_cycles > CHECK_INTERVAL) {
+        // Always check on first meaningful update, then use interval-based caching
+        const should_check = !self.first_update_done or 
+            (self.overhead_cycles -% self.last_check_cycles > CHECK_INTERVAL);
+            
+        if (should_check and self.overhead_cycles > 0) {
+            self.first_update_done = true;
             self.last_check_cycles = self.overhead_cycles;
-            self.should_promote_cached = self.work_cycles > (self.overhead_cycles * self.promotion_threshold);
+            self.should_promote_cached = self.work_cycles >= self.min_work_cycles and 
+                self.work_cycles > (self.overhead_cycles * self.promotion_threshold);
         }
     }
     
@@ -44,6 +51,7 @@ pub const TokenAccount = struct {
         self.overhead_cycles = 0;
         self.should_promote_cached = false;
         self.last_check_cycles = 0;
+        self.first_update_done = false;
     }
 };
 

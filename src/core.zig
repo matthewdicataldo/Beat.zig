@@ -9,6 +9,7 @@ pub const memory = @import("memory.zig");
 pub const scheduler = @import("scheduler.zig");
 pub const pcall = @import("pcall.zig");
 pub const coz = @import("coz.zig");
+pub const testing = @import("testing.zig");
 
 // Version info
 pub const version = std.SemanticVersion{

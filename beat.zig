@@ -15,6 +15,7 @@ pub const memory = @import("src/memory.zig");
 pub const scheduler = @import("src/scheduler.zig");
 pub const pcall = @import("src/pcall.zig");
 pub const coz = @import("src/coz.zig");
+pub const testing = @import("src/testing.zig");
 
 // Import core for main types
 const core = @import("src/core.zig");
