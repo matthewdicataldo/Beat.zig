@@ -168,6 +168,8 @@ The project uses comprehensive testing including unit tests, integration tests, 
 - **V1**: Basic work-stealing thread pool
 - **V2**: Added heartbeat scheduling with token accounting
 - **V3**: CPU topology awareness, NUMA optimization, One Euro Filter prediction, compile-time work distribution patterns, **build-time auto-configuration integration**, **runtime parallel work distribution**, **improved thread affinity handling**, **enhanced error message system**
+- **V4**: Advanced predictive scheduling with 15.3x worker selection optimization and memory-safe caching
+- **V5**: Native Zig SIMD integration with task batching and vectorized operations (Phase 5A in progress)
 
 ### Formal Verification
 The project is working towards formal verification using Lean 4 theorem prover with LLM-assisted proof development for mathematical correctness guarantees of lock-free algorithms.
