@@ -21,7 +21,7 @@ This file tracks development progress across all planned features and improvemen
 - [x] Work promotion trigger in heartbeat scheduler
 - [x] Documentation generation and build system integration
 
-## Phase 2: Advanced Predictive Scheduling 🚧
+## Phase 2: Advanced Predictive Scheduling ✅
 
 ### Task Fingerprinting and Classification
 - [x] **2.1.1**: Implement multi-dimensional task fingerprinting ✅ **DESIGNED**
@@ -85,17 +85,25 @@ This file tracks development progress across all planned features and improvemen
   - [x] Add test command: `zig build test-intelligent-decision`
 
 ### Integration with Heartbeat Scheduler
-- [ ] **2.4.1**: Predictive token accounting
-  - [ ] Enhance existing TokenAccount with predictions
-  - [ ] Integrate execution time predictions
-  - [ ] Adaptive promotion thresholds
-  - [ ] Confidence-based promotion decisions
+- [x] **2.4.1**: Predictive token accounting ✅ **COMPLETED**
+  - [x] Enhance existing TokenAccount with predictions
+  - [x] Integrate execution time predictions
+  - [x] Adaptive promotion thresholds
+  - [x] Confidence-based promotion decisions
+  - [x] Integration with fingerprint registry and intelligent decision framework
+  - [x] Comprehensive prediction tracking and accuracy monitoring
+  - [x] Enhanced scheduler with predictive capabilities
+  - [x] Add test command: `zig build test-predictive-accounting`
 
-- [ ] **2.4.2**: Advanced worker selection algorithm
-  - [ ] Replace simple round-robin with predictive selection
-  - [ ] Multi-criteria optimization scoring
-  - [ ] Integration with existing topology awareness
-  - [ ] Exploratory placement for new task types
+- [x] **2.4.2**: Advanced worker selection algorithm ✅ **COMPLETED**
+  - [x] Replace simple round-robin with predictive selection
+  - [x] Multi-criteria optimization scoring with 5 weighted criteria
+  - [x] Integration with existing topology awareness and NUMA optimization
+  - [x] Exploratory placement for new task types and load balancing
+  - [x] Adaptive learning and criteria adjustment based on performance
+  - [x] Comprehensive worker evaluation with detailed decision rationale
+  - [x] Full ThreadPool integration with fallback to intelligent decision framework
+  - [x] Add test command: `zig build test-advanced-worker-selection`
 
 ### Performance Validation
 - [ ] **2.5.1**: Benchmarking framework

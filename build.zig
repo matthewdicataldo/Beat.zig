@@ -495,4 +495,162 @@ pub fn build(b: *std.Build) void {
     const run_intelligent_decision_test = b.addRunArtifact(intelligent_decision_test);
     const intelligent_decision_test_step = b.step("test-intelligent-decision", "Test intelligent decision framework for confidence-based scheduling");
     intelligent_decision_test_step.dependOn(&run_intelligent_decision_test.step);
+    
+    // Predictive token accounting test
+    const predictive_accounting_test = b.addTest(.{
+        .root_source_file = b.path("test_predictive_accounting.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, predictive_accounting_test, auto_config);
+    
+    const run_predictive_accounting_test = b.addRunArtifact(predictive_accounting_test);
+    const predictive_accounting_test_step = b.step("test-predictive-accounting", "Test predictive token accounting with confidence-based promotion decisions");
+    predictive_accounting_test_step.dependOn(&run_predictive_accounting_test.step);
+    
+    // Advanced worker selection test
+    const advanced_worker_selection_test = b.addTest(.{
+        .root_source_file = b.path("test_advanced_worker_selection.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, advanced_worker_selection_test, auto_config);
+    
+    const run_advanced_worker_selection_test = b.addRunArtifact(advanced_worker_selection_test);
+    const advanced_worker_selection_test_step = b.step("test-advanced-worker-selection", "Test advanced worker selection algorithm with multi-criteria optimization");
+    advanced_worker_selection_test_step.dependOn(&run_advanced_worker_selection_test.step);
+    
+    // Advanced scheduling benchmark
+    const advanced_scheduling_benchmark = b.addExecutable(.{
+        .name = "benchmark_advanced_scheduling",
+        .root_source_file = b.path("benchmark_advanced_scheduling.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, advanced_scheduling_benchmark, auto_config);
+    
+    const run_advanced_scheduling_benchmark = b.addRunArtifact(advanced_scheduling_benchmark);
+    const advanced_scheduling_benchmark_step = b.step("bench-advanced-scheduling", "Benchmark advanced predictive scheduling performance improvements");
+    advanced_scheduling_benchmark_step.dependOn(&run_advanced_scheduling_benchmark.step);
+    
+    // Simple scheduling benchmark
+    const simple_scheduling_benchmark = b.addExecutable(.{
+        .name = "benchmark_simple_scheduling",
+        .root_source_file = b.path("benchmark_simple_scheduling.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, simple_scheduling_benchmark, auto_config);
+    
+    const run_simple_scheduling_benchmark = b.addRunArtifact(simple_scheduling_benchmark);
+    const simple_scheduling_benchmark_step = b.step("bench-simple-scheduling", "Simple focused benchmark for advanced scheduling features");
+    simple_scheduling_benchmark_step.dependOn(&run_simple_scheduling_benchmark.step);
+    
+    // Prediction accuracy micro-benchmark
+    const prediction_accuracy_benchmark = b.addExecutable(.{
+        .name = "benchmark_prediction_accuracy",
+        .root_source_file = b.path("benchmark_prediction_accuracy.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, prediction_accuracy_benchmark, auto_config);
+    
+    const run_prediction_accuracy_benchmark = b.addRunArtifact(prediction_accuracy_benchmark);
+    const prediction_accuracy_benchmark_step = b.step("bench-prediction-accuracy", "Micro-benchmarks for prediction accuracy measurement (Task 2.5.1)");
+    prediction_accuracy_benchmark_step.dependOn(&run_prediction_accuracy_benchmark.step);
+    
+    // A/B testing framework
+    const ab_testing_framework = b.addExecutable(.{
+        .name = "ab_testing_framework",
+        .root_source_file = b.path("ab_testing_framework.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, ab_testing_framework, auto_config);
+    
+    const run_ab_testing_framework = b.addRunArtifact(ab_testing_framework);
+    const ab_testing_framework_step = b.step("ab-test", "A/B testing infrastructure for scheduling comparison (Task 2.5.1.2)");
+    ab_testing_framework_step.dependOn(&run_ab_testing_framework.step);
+    
+    // Enhanced COZ profiler benchmark
+    const coz_enhanced_benchmark = b.addExecutable(.{
+        .name = "benchmark_coz_enhanced",
+        .root_source_file = b.path("benchmark_coz_enhanced.zig"),
+        .target = target,
+        .optimize = if (enable_coz) .ReleaseSafe else .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, coz_enhanced_benchmark, auto_config);
+    
+    if (enable_coz) {
+        coz_enhanced_benchmark.root_module.omit_frame_pointer = false;
+    }
+    
+    const run_coz_enhanced_benchmark = b.addRunArtifact(coz_enhanced_benchmark);
+    const coz_enhanced_benchmark_step = b.step("bench-coz-enhanced", "Enhanced COZ profiler integration benchmark (Task 2.5.1.3)");
+    coz_enhanced_benchmark_step.dependOn(&run_coz_enhanced_benchmark.step);
+    
+    // Fingerprint cache optimization
+    const cache_optimization = b.addExecutable(.{
+        .name = "fingerprint_cache_optimization",
+        .root_source_file = b.path("fingerprint_cache_optimization.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, cache_optimization, auto_config);
+    
+    const run_cache_optimization = b.addRunArtifact(cache_optimization);
+    const cache_optimization_step = b.step("test-cache-optimization", "Test prediction lookup caching optimization");
+    cache_optimization_step.dependOn(&run_cache_optimization.step);
+    
+    // Optimization validation framework
+    const optimization_validation = b.addExecutable(.{
+        .name = "optimization_validation",
+        .root_source_file = b.path("optimization_validation.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, optimization_validation, auto_config);
+    
+    const run_optimization_validation = b.addRunArtifact(optimization_validation);
+    const optimization_validation_step = b.step("validate-optimizations", "Validate optimization performance improvements");
+    optimization_validation_step.dependOn(&run_optimization_validation.step);
+    
+    // Worker selection fast path optimization
+    const worker_selection_optimization = b.addExecutable(.{
+        .name = "worker_selection_optimization",
+        .root_source_file = b.path("worker_selection_optimization.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, worker_selection_optimization, auto_config);
+    
+    const run_worker_selection_optimization = b.addRunArtifact(worker_selection_optimization);
+    const worker_selection_optimization_step = b.step("test-worker-selection-optimization", "Test worker selection fast path optimization to reduce 120.6x overhead");
+    worker_selection_optimization_step.dependOn(&run_worker_selection_optimization.step);
+    
+    // Integrated worker selection optimization test
+    const integrated_worker_optimization = b.addExecutable(.{
+        .name = "optimized_worker_selection_integration",
+        .root_source_file = b.path("optimized_worker_selection_integration.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, integrated_worker_optimization, auto_config);
+    
+    const run_integrated_worker_optimization = b.addRunArtifact(integrated_worker_optimization);
+    const integrated_worker_optimization_step = b.step("test-integrated-worker-optimization", "Test integrated worker selection optimization for direct ThreadPool integration");
+    integrated_worker_optimization_step.dependOn(&run_integrated_worker_optimization.step);
+    
+    // Fixed cache optimization test
+    const fixed_cache_optimization = b.addExecutable(.{
+        .name = "fixed_cache_optimization",
+        .root_source_file = b.path("fixed_cache_optimization.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, fixed_cache_optimization, auto_config);
+    
+    const run_fixed_cache_optimization = b.addRunArtifact(fixed_cache_optimization);
+    const fixed_cache_optimization_step = b.step("test-fixed-cache-optimization", "Test fixed prediction lookup caching with proper memory management");
+    fixed_cache_optimization_step.dependOn(&run_fixed_cache_optimization.step);
 }

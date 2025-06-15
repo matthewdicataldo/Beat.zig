@@ -14,6 +14,8 @@ pub const build_opts = @import("build_opts.zig");
 pub const comptime_work = @import("comptime_work.zig");
 pub const fingerprint = @import("fingerprint.zig");
 pub const intelligent_decision = @import("intelligent_decision.zig");
+pub const predictive_accounting = @import("predictive_accounting.zig");
+pub const advanced_worker_selection = @import("advanced_worker_selection.zig");
 
 // Version info
 pub const version = std.SemanticVersion{
@@ -64,6 +66,11 @@ pub const Config = struct {
     // Statistics and debugging
     enable_statistics: bool = true,          
     enable_trace: bool = false,
+    
+    // Advanced worker selection (Task 2.4.2)
+    enable_advanced_selection: bool = true,        // Use multi-criteria optimization
+    selection_criteria: ?advanced_worker_selection.SelectionCriteria = null,  // null = auto-detect optimal
+    enable_selection_learning: bool = true,       // Adaptive criteria adjustment
 };
 
 // ============================================================================
@@ -163,6 +170,7 @@ pub const ThreadPool = struct {
     memory_pool: ?*memory.TaskPool = null,
     decision_framework: ?*intelligent_decision.IntelligentDecisionFramework = null,
     fingerprint_registry: ?*fingerprint.FingerprintRegistry = null,
+    advanced_selector: ?*advanced_worker_selection.AdvancedWorkerSelector = null,
     
     const Self = @This();
     
@@ -284,6 +292,22 @@ pub const ThreadPool = struct {
             self.decision_framework.?.setFingerprintRegistry(self.fingerprint_registry.?);
         }
         
+        // Initialize advanced worker selector (Task 2.4.2)
+        if (actual_config.enable_advanced_selection) {
+            const selection_criteria = actual_config.selection_criteria orelse 
+                advanced_worker_selection.SelectionCriteria.balanced();
+            
+            self.advanced_selector = try allocator.create(advanced_worker_selection.AdvancedWorkerSelector);
+            self.advanced_selector.?.* = advanced_worker_selection.AdvancedWorkerSelector.init(allocator, selection_criteria);
+            
+            // Connect prediction and analysis components if available
+            self.advanced_selector.?.setComponents(
+                self.fingerprint_registry,
+                null, // Predictive scheduler will be set later if available
+                self.decision_framework
+            );
+        }
+        
         // Initialize workers
         for (self.workers, 0..) |*worker, i| {
             const worker_config = WorkerConfig{
@@ -350,6 +374,10 @@ pub const ThreadPool = struct {
             self.allocator.destroy(framework);
         }
         
+        if (self.advanced_selector) |selector| {
+            self.allocator.destroy(selector);
+        }
+        
         self.allocator.free(self.workers);
         self.allocator.destroy(self);
     }
@@ -407,8 +435,53 @@ pub const ThreadPool = struct {
         }
     }
     
-    fn selectWorker(self: *Self, task: Task) usize {
-        // Use intelligent decision framework if available (Task 2.3.2)
+    pub fn selectWorker(self: *Self, task: Task) usize {
+        // Use advanced worker selector if available (Task 2.4.2)
+        if (self.advanced_selector) |selector| {
+            // Record task execution for fingerprinting if registry is available
+            if (self.fingerprint_registry) |_| {
+                // Generate fingerprint for task
+                var context = fingerprint.ExecutionContext.init();
+                
+                const task_fingerprint = fingerprint.generateTaskFingerprint(&task, &context);
+                
+                // Set task fingerprint hash for tracking
+                var mutable_task = task;
+                mutable_task.fingerprint_hash = task_fingerprint.hash();
+                mutable_task.creation_timestamp = @intCast(std.time.nanoTimestamp());
+            }
+            
+            // Create worker info array for decision making
+            var worker_infos = std.ArrayList(intelligent_decision.WorkerInfo).init(self.allocator);
+            defer worker_infos.deinit();
+            
+            for (self.workers, 0..) |*worker, i| {
+                const worker_info = intelligent_decision.WorkerInfo{
+                    .id = worker.id,
+                    .numa_node = worker.numa_node,
+                    .queue_size = self.getWorkerQueueSize(i),
+                    .max_queue_size = 1024, // Default max queue size
+                };
+                
+                worker_infos.append(worker_info) catch {
+                    // Fallback to legacy selection on allocation failure
+                    return self.selectWorkerLegacy(task);
+                };
+            }
+            
+            // Use advanced multi-criteria optimization
+            const decision = selector.selectWorker(&task, worker_infos.items, if (self.topology) |*topo| topo else null) catch {
+                // Fallback to legacy selection on error
+                return self.selectWorkerLegacy(task);
+            };
+            
+            // Cleanup the decision (but not the worker_infos since it's handled by defer)
+            self.allocator.free(decision.evaluations);
+            
+            return decision.selected_worker_id;
+        }
+        
+        // Fallback to intelligent decision framework (Task 2.3.2)
         if (self.decision_framework) |framework| {
             // Record task execution for fingerprinting if registry is available
             if (self.fingerprint_registry) |_| {
@@ -455,7 +528,7 @@ pub const ThreadPool = struct {
         return self.selectWorkerLegacy(task);
     }
     
-    fn selectWorkerLegacy(self: *Self, task: Task) usize {
+    pub fn selectWorkerLegacy(self: *Self, task: Task) usize {
         // Legacy smart worker selection (pre-intelligent framework)
         
         // 1. Honor explicit affinity hint if provided
@@ -543,7 +616,7 @@ pub const ThreadPool = struct {
         return best_worker;
     }
     
-    fn getWorkerQueueSize(self: *Self, worker_id: usize) usize {
+    pub fn getWorkerQueueSize(self: *Self, worker_id: usize) usize {
         const worker = &self.workers[worker_id];
         
         return switch (worker.queue) {
