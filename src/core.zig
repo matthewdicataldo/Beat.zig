@@ -20,6 +20,8 @@ pub const predictive_accounting = @import("predictive_accounting.zig");
 pub const advanced_worker_selection = @import("advanced_worker_selection.zig");
 pub const memory_pressure = @import("memory_pressure.zig");
 pub const simd = @import("simd.zig");
+pub const simd_batch = @import("simd_batch.zig");
+pub const simd_queue = @import("simd_queue.zig");
 
 // Version info
 pub const version = std.SemanticVersion{

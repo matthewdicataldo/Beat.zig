@@ -461,6 +461,32 @@ pub fn build(b: *std.Build) void {
     const simd_worker_integration_test_step = b.step("test-simd-integration", "Test SIMD-aware worker selection integration");
     simd_worker_integration_test_step.dependOn(&run_simd_worker_integration_test.step);
     
+    // SIMD batch architecture test
+    const simd_batch_architecture_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_simd_batch_architecture.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    simd_batch_architecture_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, simd_batch_architecture_test, auto_config);
+    
+    const run_simd_batch_architecture_test = b.addRunArtifact(simd_batch_architecture_test);
+    const simd_batch_architecture_test_step = b.step("test-simd-batch", "Test SIMD task batch architecture with type-safe vectorization");
+    simd_batch_architecture_test_step.dependOn(&run_simd_batch_architecture_test.step);
+    
+    // SIMD queue operations test
+    const simd_queue_operations_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_simd_queue_operations.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    simd_queue_operations_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, simd_queue_operations_test, auto_config);
+    
+    const run_simd_queue_operations_test = b.addRunArtifact(simd_queue_operations_test);
+    const simd_queue_operations_test_step = b.step("test-simd-queue", "Test SIMD vectorized queue operations and work-stealing integration");
+    simd_queue_operations_test_step.dependOn(&run_simd_queue_operations_test.step);
+    
     // Advanced scheduling benchmark
     const advanced_scheduling_benchmark = b.addExecutable(.{
         .name = "benchmark_advanced_scheduling",
