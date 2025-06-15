@@ -19,6 +19,7 @@ pub const intelligent_decision = @import("intelligent_decision.zig");
 pub const predictive_accounting = @import("predictive_accounting.zig");
 pub const advanced_worker_selection = @import("advanced_worker_selection.zig");
 pub const memory_pressure = @import("memory_pressure.zig");
+pub const simd = @import("simd.zig");
 
 // Version info
 pub const version = std.SemanticVersion{

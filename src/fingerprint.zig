@@ -239,9 +239,35 @@ pub const TaskAnalyzer = struct {
     
     fn detectOptimalSimdWidth(task: *const core.Task) u4 {
         const data_size = getDataSize(task);
+        
+        // Too small for SIMD - use scalar
         if (data_size < 16) return 1;
-        if (data_size >= 64) return 8;
-        return 4;
+        
+        // Analyze data alignment for SIMD suitability  
+        const alignment = @ctz(@intFromPtr(task.data));
+        
+        // Check for known data patterns that benefit from SIMD
+        const access_pattern = analyzeAccessPattern(task);
+        const simd_benefit: u8 = switch (access_pattern) {
+            .sequential => 15,      // Perfect for SIMD
+            .strided => 12,         // Good for SIMD with gather/scatter
+            .hierarchical => 8,     // Some SIMD benefit
+            .random => 3,           // Minimal SIMD benefit
+            else => 6,
+        };
+        
+        // Determine optimal width based on data characteristics
+        if (data_size >= 512 and alignment >= 6 and simd_benefit >= 12) {
+            return 15; // 512-bit vectors (AVX-512)
+        } else if (data_size >= 256 and alignment >= 5 and simd_benefit >= 10) {
+            return 8;  // 256-bit vectors (AVX2)
+        } else if (data_size >= 128 and alignment >= 4 and simd_benefit >= 8) {
+            return 4;  // 128-bit vectors (SSE/NEON)
+        } else if (data_size >= 64 and simd_benefit >= 6) {
+            return 2;  // 64-bit vectors (basic SIMD)
+        } else {
+            return 1;  // Scalar processing
+        }
     }
     
     fn estimateCacheLocality(task: *const core.Task) u4 {

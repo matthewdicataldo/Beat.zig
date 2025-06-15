@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const simd = @import("simd.zig");
 
 // CPU topology detection and thread affinity
 
@@ -46,6 +47,10 @@ pub const CpuTopology = struct {
     physical_cores: u32,
     sockets: u32,
     allocator: std.mem.Allocator,
+    
+    // SIMD capability information
+    simd_capability: simd.SIMDCapability,
+    simd_registry: ?*simd.SIMDCapabilityRegistry,
     
     // Lookup tables
     logical_to_physical: []u32,
@@ -194,6 +199,8 @@ fn detectTopologyLinux(allocator: std.mem.Allocator) !CpuTopology {
         .physical_cores = @intCast(physical_ids.count()),
         .sockets = @intCast(socket_ids.count()),
         .allocator = allocator,
+        .simd_capability = simd.SIMDCapability.detect(),
+        .simd_registry = null,
         .logical_to_physical = logical_to_physical,
         .logical_to_numa = logical_to_numa,
         .logical_to_socket = logical_to_socket,
@@ -253,6 +260,8 @@ fn detectTopologyFallback(allocator: std.mem.Allocator) !CpuTopology {
         .physical_cores = @intCast(cpu_count),
         .sockets = 1,
         .allocator = allocator,
+        .simd_capability = simd.SIMDCapability.detect(),
+        .simd_registry = null,
         .logical_to_physical = logical_to_physical,
         .logical_to_numa = logical_to_numa,
         .logical_to_socket = logical_to_socket,

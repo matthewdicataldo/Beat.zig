@@ -435,6 +435,32 @@ pub fn build(b: *std.Build) void {
     const advanced_worker_selection_test_step = b.step("test-advanced-worker-selection", "Test advanced worker selection algorithm with multi-criteria optimization");
     advanced_worker_selection_test_step.dependOn(&run_advanced_worker_selection_test.step);
     
+    // SIMD foundation test
+    const simd_foundation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_simd_foundation.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    simd_foundation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, simd_foundation_test, auto_config);
+    
+    const run_simd_foundation_test = b.addRunArtifact(simd_foundation_test);
+    const simd_foundation_test_step = b.step("test-simd", "Test SIMD capability detection, registry, and enhanced fingerprinting");
+    simd_foundation_test_step.dependOn(&run_simd_foundation_test.step);
+    
+    // SIMD worker integration test
+    const simd_worker_integration_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_simd_worker_integration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    simd_worker_integration_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, simd_worker_integration_test, auto_config);
+    
+    const run_simd_worker_integration_test = b.addRunArtifact(simd_worker_integration_test);
+    const simd_worker_integration_test_step = b.step("test-simd-integration", "Test SIMD-aware worker selection integration");
+    simd_worker_integration_test_step.dependOn(&run_simd_worker_integration_test.step);
+    
     // Advanced scheduling benchmark
     const advanced_scheduling_benchmark = b.addExecutable(.{
         .name = "benchmark_advanced_scheduling",

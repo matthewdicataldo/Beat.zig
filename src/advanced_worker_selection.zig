@@ -6,6 +6,7 @@ const fingerprint = @import("fingerprint.zig");
 const intelligent_decision = @import("intelligent_decision.zig");
 const predictive_accounting = @import("predictive_accounting.zig");
 const topology = @import("topology.zig");
+const simd = @import("simd.zig");
 
 // Advanced Worker Selection Algorithm for Beat.zig (Task 2.4.2)
 //
@@ -20,11 +21,12 @@ const topology = @import("topology.zig");
 
 /// Comprehensive scoring criteria for worker selection decisions
 pub const SelectionCriteria = struct {
-    load_balance_weight: f32 = 0.25,        // Queue length and utilization
-    prediction_weight: f32 = 0.25,          // Execution time predictions
+    load_balance_weight: f32 = 0.20,        // Queue length and utilization
+    prediction_weight: f32 = 0.20,          // Execution time predictions
     topology_weight: f32 = 0.20,            // NUMA and cache locality
     confidence_weight: f32 = 0.15,          // Prediction confidence levels
     exploration_weight: f32 = 0.15,         // New task type exploration
+    simd_weight: f32 = 0.10,                // SIMD capability matching
     
     // Dynamic adjustment factors
     enable_adaptive_weights: bool = true,    // Adjust weights based on performance
@@ -34,7 +36,7 @@ pub const SelectionCriteria = struct {
     /// Validate and normalize criteria weights
     pub fn normalize(self: *SelectionCriteria) void {
         const total = self.load_balance_weight + self.prediction_weight + 
-                     self.topology_weight + self.confidence_weight + self.exploration_weight;
+                     self.topology_weight + self.confidence_weight + self.exploration_weight + self.simd_weight;
         
         if (total > 0.0) {
             self.load_balance_weight /= total;
@@ -42,6 +44,7 @@ pub const SelectionCriteria = struct {
             self.topology_weight /= total;
             self.confidence_weight /= total;
             self.exploration_weight /= total;
+            self.simd_weight /= total;
         }
     }
     
@@ -87,6 +90,7 @@ pub const WorkerEvaluation = struct {
     topology_score: f32,            // 1.0 = best locality/affinity
     confidence_score: f32,          // 1.0 = highest prediction confidence
     exploration_score: f32,         // 1.0 = best exploration opportunity
+    simd_score: f32,                // 1.0 = best SIMD capability match
     
     // Composite scores
     weighted_score: f32,            // Final weighted combination
@@ -108,6 +112,7 @@ pub const WorkerEvaluation = struct {
             .topology_score = 0.0,
             .confidence_score = 0.0,
             .exploration_score = 0.0,
+            .simd_score = 0.0,
             .weighted_score = 0.0,
             .normalized_score = 0.0,
             .queue_size = 0,
@@ -125,7 +130,8 @@ pub const WorkerEvaluation = struct {
             self.prediction_score * criteria.prediction_weight +
             self.topology_score * criteria.topology_weight +
             self.confidence_score * criteria.confidence_weight +
-            self.exploration_score * criteria.exploration_weight;
+            self.exploration_score * criteria.exploration_weight +
+            self.simd_score * criteria.simd_weight;
     }
 };
 
@@ -184,6 +190,7 @@ pub const AdvancedWorkerSelector = struct {
     fingerprint_registry: ?*fingerprint.FingerprintRegistry = null,
     predictive_scheduler: ?*predictive_accounting.PredictiveScheduler = null,
     decision_framework: ?*intelligent_decision.IntelligentDecisionFramework = null,
+    simd_registry: ?*simd.SIMDCapabilityRegistry = null,
     
     // Selection history and learning
     selection_history: SelectionHistory,
@@ -277,11 +284,13 @@ pub const AdvancedWorkerSelector = struct {
         self: *Self,
         fingerprint_registry: ?*fingerprint.FingerprintRegistry,
         predictive_scheduler: ?*predictive_accounting.PredictiveScheduler,
-        decision_framework: ?*intelligent_decision.IntelligentDecisionFramework
+        decision_framework: ?*intelligent_decision.IntelligentDecisionFramework,
+        simd_registry: ?*simd.SIMDCapabilityRegistry
     ) void {
         self.fingerprint_registry = fingerprint_registry;
         self.predictive_scheduler = predictive_scheduler;
         self.decision_framework = decision_framework;
+        self.simd_registry = simd_registry;
     }
     
     /// Select optimal worker using multi-criteria optimization
@@ -361,6 +370,9 @@ pub const AdvancedWorkerSelector = struct {
         
         // 5. Exploration Score (new task type discovery)
         evaluation.exploration_score = self.calculateExplorationScore(task, worker_info, evaluation);
+        
+        // 6. SIMD Score (vectorization capability matching)
+        evaluation.simd_score = self.calculateSIMDScore(task, worker_info, evaluation);
     }
     
     /// Calculate load balance score based on queue utilization
@@ -484,6 +496,67 @@ pub const AdvancedWorkerSelector = struct {
         
         evaluation.exploration_factor = frequency_score + load_boost;
         return @min(1.0, evaluation.exploration_factor);
+    }
+    
+    /// Calculate SIMD score based on vectorization capability matching
+    fn calculateSIMDScore(
+        self: *Self,
+        task: *const core.Task,
+        worker_info: intelligent_decision.WorkerInfo,
+        evaluation: *WorkerEvaluation
+    ) f32 {
+        _ = evaluation; // May be used for detailed analysis in the future
+        
+        // If no SIMD registry available, assume all workers are equal
+        const simd_registry = self.simd_registry orelse return 0.5;
+        
+        // Get task SIMD requirements from fingerprint
+        const task_fingerprint = blk: {
+            const context = fingerprint.ExecutionContext.init();
+            break :blk fingerprint.TaskAnalyzer.analyzeTask(task, &context);
+        };
+        
+        // Get worker SIMD capabilities
+        const worker_capability = simd_registry.getWorkerCapability(worker_info.id);
+        
+        // Calculate SIMD suitability score (0.0 to 1.0)
+        var simd_score: f32 = 0.0;
+        
+        // 1. Vector width matching (40% of score)
+        const required_width = @as(u16, @intCast(task_fingerprint.simd_width)) * 64; // Convert hint to bits
+        if (worker_capability.max_vector_width_bits >= required_width) {
+            simd_score += 0.4; // Full points for meeting requirements
+        } else if (worker_capability.max_vector_width_bits >= 128) {
+            simd_score += 0.2; // Partial points for basic SIMD support
+        }
+        
+        // 2. Vectorization benefit potential (30% of score)
+        const vectorization_benefit = @as(f32, @floatFromInt(task_fingerprint.vectorization_benefit)) / 15.0;
+        if (vectorization_benefit > 0.8) {
+            // High benefit tasks get full SIMD score boost
+            simd_score += 0.3 * vectorization_benefit;
+        } else if (vectorization_benefit > 0.4) {
+            // Medium benefit tasks get partial boost
+            simd_score += 0.15 * vectorization_benefit;
+        }
+        
+        // 3. Access pattern compatibility (20% of score)
+        const access_pattern_score: f32 = switch (task_fingerprint.access_pattern) {
+            .sequential => 1.0,      // Perfect for SIMD
+            .strided => 0.8,         // Good for SIMD with gather/scatter
+            .hierarchical => 0.6,    // Some SIMD benefit
+            else => 0.3,             // Limited SIMD benefit
+        };
+        simd_score += 0.2 * access_pattern_score;
+        
+        // 4. Performance potential (10% of score)
+        const data_type: simd.SIMDDataType = if (task_fingerprint.memory_footprint_log2 >= 2) .f32 else .i32;
+        const performance_multiplier = worker_capability.getPerformanceScore(data_type);
+        if (performance_multiplier > 2.0) {
+            simd_score += 0.1; // Bonus for high-performance SIMD
+        }
+        
+        return @min(1.0, simd_score);
     }
     
     /// Normalize scores across all workers

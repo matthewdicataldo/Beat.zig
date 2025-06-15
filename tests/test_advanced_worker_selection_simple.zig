@@ -23,7 +23,7 @@ test "advanced worker selection - basic functionality" {
     criteria.normalize();
     
     const total = criteria.load_balance_weight + criteria.prediction_weight + 
-                 criteria.topology_weight + criteria.confidence_weight + criteria.exploration_weight;
+                 criteria.topology_weight + criteria.confidence_weight + criteria.exploration_weight + criteria.simd_weight;
     
     try std.testing.expect(@abs(total - 1.0) < 0.001);
     std.debug.print("   ✅ Criteria normalization works\n", .{});
@@ -41,6 +41,7 @@ test "advanced worker selection - basic functionality" {
     evaluation.topology_score = 0.9;
     evaluation.confidence_score = 0.7;
     evaluation.exploration_score = 0.5;
+    evaluation.simd_score = 0.8;
     
     const balanced_criteria = beat.advanced_worker_selection.SelectionCriteria.balanced();
     evaluation.calculateWeightedScore(balanced_criteria);
@@ -65,7 +66,7 @@ test "advanced worker selection - basic functionality" {
         beat.intelligent_decision.DecisionConfig{}
     );
     
-    selector.setComponents(&fingerprint_registry, null, &decision_framework);
+    selector.setComponents(&fingerprint_registry, null, &decision_framework, null);
     
     try std.testing.expect(selector.fingerprint_registry != null);
     try std.testing.expect(selector.decision_framework != null);
