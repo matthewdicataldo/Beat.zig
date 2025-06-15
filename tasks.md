@@ -73,11 +73,16 @@ This file tracks development progress across all planned features and improvemen
   - [x] MultiFactorConfidence structure with detailed analysis capabilities
   - [x] Add test command: `zig build test-multi-factor-confidence`
 
-- [ ] **2.3.2**: Intelligent decision framework
-  - [ ] Confidence thresholds for scheduling decisions
-  - [ ] Conservative placement for low confidence
-  - [ ] NUMA optimization for high confidence long tasks
-  - [ ] Balanced approach for medium confidence
+- [x] **2.3.2**: Intelligent decision framework ✅ **COMPLETED**
+  - [x] Confidence thresholds for scheduling decisions (0.8 high, 0.5 medium, 0.2 low)
+  - [x] Conservative placement for low confidence tasks (queue fill ratio limits, local NUMA preference)
+  - [x] NUMA optimization for high confidence long tasks (>10k cycles threshold)
+  - [x] Balanced approach for medium confidence tasks (confidence + prediction weighting)
+  - [x] Comprehensive scheduling decision rationale system
+  - [x] Four distinct scheduling strategies (very_conservative, conservative, balanced, aggressive)
+  - [x] Integration with existing ThreadPool selectWorker mechanism
+  - [x] IntelligentDecisionFramework API with WorkerInfo abstraction
+  - [x] Add test command: `zig build test-intelligent-decision`
 
 ### Integration with Heartbeat Scheduler
 - [ ] **2.4.1**: Predictive token accounting

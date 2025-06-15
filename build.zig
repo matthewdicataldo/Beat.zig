@@ -483,4 +483,16 @@ pub fn build(b: *std.Build) void {
     const run_multi_factor_confidence_test = b.addRunArtifact(multi_factor_confidence_test);
     const multi_factor_confidence_test_step = b.step("test-multi-factor-confidence", "Test multi-factor confidence model for enhanced scheduling decisions");
     multi_factor_confidence_test_step.dependOn(&run_multi_factor_confidence_test.step);
+    
+    // Intelligent decision framework test
+    const intelligent_decision_test = b.addTest(.{
+        .root_source_file = b.path("test_intelligent_decision_framework.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    build_config.addBuildOptions(b, intelligent_decision_test, auto_config);
+    
+    const run_intelligent_decision_test = b.addRunArtifact(intelligent_decision_test);
+    const intelligent_decision_test_step = b.step("test-intelligent-decision", "Test intelligent decision framework for confidence-based scheduling");
+    intelligent_decision_test_step.dependOn(&run_intelligent_decision_test.step);
 }

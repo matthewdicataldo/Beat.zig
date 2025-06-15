@@ -13,6 +13,7 @@ pub const testing = @import("testing.zig");
 pub const build_opts = @import("build_opts.zig");
 pub const comptime_work = @import("comptime_work.zig");
 pub const fingerprint = @import("fingerprint.zig");
+pub const intelligent_decision = @import("intelligent_decision.zig");
 
 // Version info
 pub const version = std.SemanticVersion{
@@ -160,6 +161,8 @@ pub const ThreadPool = struct {
     topology: ?topology.CpuTopology = null,
     scheduler: ?*scheduler.Scheduler = null,
     memory_pool: ?*memory.TaskPool = null,
+    decision_framework: ?*intelligent_decision.IntelligentDecisionFramework = null,
+    fingerprint_registry: ?*fingerprint.FingerprintRegistry = null,
     
     const Self = @This();
     
@@ -267,6 +270,20 @@ pub const ThreadPool = struct {
             self.memory_pool.?.* = pool;
         }
         
+        // Initialize intelligent decision framework if predictive features are enabled
+        if (actual_config.enable_predictive) {
+            const decision_config = intelligent_decision.DecisionConfig{};
+            self.decision_framework = try allocator.create(intelligent_decision.IntelligentDecisionFramework);
+            self.decision_framework.?.* = intelligent_decision.IntelligentDecisionFramework.init(decision_config);
+            
+            // Initialize fingerprint registry for predictive scheduling
+            self.fingerprint_registry = try allocator.create(fingerprint.FingerprintRegistry);
+            self.fingerprint_registry.?.* = fingerprint.FingerprintRegistry.init(allocator);
+            
+            // Connect the registry to the decision framework
+            self.decision_framework.?.setFingerprintRegistry(self.fingerprint_registry.?);
+        }
+        
         // Initialize workers
         for (self.workers, 0..) |*worker, i| {
             const worker_config = WorkerConfig{
@@ -322,6 +339,15 @@ pub const ThreadPool = struct {
         if (self.memory_pool) |pool| {
             pool.deinit();
             self.allocator.destroy(pool);
+        }
+        
+        if (self.fingerprint_registry) |registry| {
+            registry.deinit();
+            self.allocator.destroy(registry);
+        }
+        
+        if (self.decision_framework) |framework| {
+            self.allocator.destroy(framework);
         }
         
         self.allocator.free(self.workers);
@@ -382,7 +408,55 @@ pub const ThreadPool = struct {
     }
     
     fn selectWorker(self: *Self, task: Task) usize {
-        // Smart worker selection considering multiple factors
+        // Use intelligent decision framework if available (Task 2.3.2)
+        if (self.decision_framework) |framework| {
+            // Record task execution for fingerprinting if registry is available
+            if (self.fingerprint_registry) |_| {
+                // Generate fingerprint for task
+                var context = fingerprint.ExecutionContext.init();
+                
+                const task_fingerprint = fingerprint.generateTaskFingerprint(&task, &context);
+                
+                // Set task fingerprint hash for tracking
+                var mutable_task = task;
+                mutable_task.fingerprint_hash = task_fingerprint.hash();
+                mutable_task.creation_timestamp = @intCast(std.time.nanoTimestamp());
+            }
+            
+            // Create worker info array for decision making
+            var worker_infos = std.ArrayList(intelligent_decision.WorkerInfo).init(self.allocator);
+            defer worker_infos.deinit();
+            
+            for (self.workers, 0..) |*worker, i| {
+                const worker_info = intelligent_decision.WorkerInfo{
+                    .id = worker.id,
+                    .numa_node = worker.numa_node,
+                    .queue_size = self.getWorkerQueueSize(i),
+                    .max_queue_size = 1024, // Default max queue size
+                };
+                
+                worker_infos.append(worker_info) catch {
+                    // Fallback to legacy selection on allocation failure
+                    return self.selectWorkerLegacy(task);
+                };
+            }
+            
+            // Make intelligent scheduling decision
+            const decision = framework.makeSchedulingDecision(
+                &task,
+                worker_infos.items,
+                self.topology
+            );
+            
+            return decision.worker_id;
+        }
+        
+        // Fallback to legacy worker selection
+        return self.selectWorkerLegacy(task);
+    }
+    
+    fn selectWorkerLegacy(self: *Self, task: Task) usize {
+        // Legacy smart worker selection (pre-intelligent framework)
         
         // 1. Honor explicit affinity hint if provided
         if (task.affinity_hint) |numa_node| {
