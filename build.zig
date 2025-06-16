@@ -112,6 +112,21 @@ pub fn build(b: *std.Build) void {
     const bundle_step = b.step("example-bundle", "Run bundle usage example");
     bundle_step.dependOn(&run_bundle.step);
     
+    // A3C Reinforcement Learning Demo
+    const a3c_demo = b.addExecutable(.{
+        .name = "a3c_demo",
+        .root_source_file = b.path("examples/a3c_demo.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    build_config.addBuildOptions(b, a3c_demo, auto_config);
+    a3c_demo.root_module.addImport("zigpulse", zigpulse_module);
+    
+    const run_a3c_demo = b.addRunArtifact(a3c_demo);
+    const a3c_demo_step = b.step("demo-a3c", "Run A3C Reinforcement Learning demo");
+    a3c_demo_step.dependOn(&run_a3c_demo.step);
+    
     // Bundle file tests
     const bundle_test = b.addTest(.{
         .root_source_file = b.path("zigpulse.zig"),

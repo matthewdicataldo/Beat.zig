@@ -99,6 +99,14 @@ pub const Config = struct {
     deadlock_detection: bool = false,             // Runtime deadlock detection
     resource_leak_detection: bool = false,        // Resource cleanup validation
     
+    // A3C Reinforcement Learning Configuration (Phase 7)
+    enable_a3c_scheduling: bool = false,          // Enable A3C-based worker selection
+    a3c_learning_rate: f32 = 0.001,             // Neural network learning rate
+    a3c_confidence_threshold: f32 = 0.7,         // Minimum confidence for A3C decisions
+    a3c_exploration_rate: f32 = 0.1,             // Exploration vs exploitation balance
+    a3c_update_frequency: u32 = 100,             // Update networks every N tasks
+    enable_a3c_fallback: bool = true,            // Fallback to heuristic when confidence low
+    
     /// Create a development configuration with comprehensive debugging enabled
     pub fn createDevelopmentConfig() Config {
         var config = Config{};
@@ -223,6 +231,381 @@ pub const Config = struct {
         return recommendations.toOwnedSlice();
     }
 };
+
+// ============================================================================
+// A3C (Asynchronous Advantage Actor-Critic) Components
+// ============================================================================
+
+/// Task characteristics for A3C feature extraction
+pub const TaskFeatures = struct {
+    // Computational characteristics (8 features)
+    computational_intensity: f32,          // FLOPs per byte ratio
+    memory_access_pattern: f32,            // 0=random, 0.5=mixed, 1=sequential
+    data_size_log2: f32,                  // Log2 of data size in bytes
+    cache_locality_score: f32,             // Predicted cache behavior (0-1)
+    
+    // Parallelism indicators (4 features)
+    loop_complexity: f32,                 // Loop nesting complexity
+    branch_divergence: f32,               // Branch prediction difficulty
+    vectorization_potential: f32,          // SIMD suitability score
+    data_dependencies: f32,               // Dependency density
+    
+    // Performance requirements (4 features)
+    latency_sensitivity: f32,             // 0=throughput, 1=latency critical
+    priority_level: f32,                  // Task priority (0-1)
+    deadline_pressure: f32,               // Time pressure indicator
+    resource_requirements: f32,           // Memory/compute requirements
+    
+    pub fn init() TaskFeatures {
+        return TaskFeatures{
+            .computational_intensity = 0.5,
+            .memory_access_pattern = 0.5,
+            .data_size_log2 = 0.5,
+            .cache_locality_score = 0.5,
+            .loop_complexity = 0.5,
+            .branch_divergence = 0.5,
+            .vectorization_potential = 0.5,
+            .data_dependencies = 0.3,
+            .latency_sensitivity = 0.5,
+            .priority_level = 0.33,
+            .deadline_pressure = 0.0,
+            .resource_requirements = 0.5,
+        };
+    }
+    
+    /// Convert to array for neural network input
+    pub fn toArray(self: TaskFeatures) [16]f32 {
+        return [_]f32{
+            self.computational_intensity,
+            self.memory_access_pattern,
+            self.data_size_log2,
+            self.cache_locality_score,
+            self.loop_complexity,
+            self.branch_divergence,
+            self.vectorization_potential,
+            self.data_dependencies,
+            self.latency_sensitivity,
+            self.priority_level,
+            self.deadline_pressure,
+            self.resource_requirements,
+            // Computed features
+            self.computational_intensity * self.data_size_log2, // Compute load
+            self.memory_access_pattern * self.cache_locality_score, // Memory efficiency
+            self.vectorization_potential * self.loop_complexity, // Parallelism score
+            self.latency_sensitivity * self.priority_level, // Urgency score
+        };
+    }
+};
+
+/// System state representation for A3C (simplified for core.zig)
+pub const A3CSystemState = struct {
+    // Worker queue state (simplified)
+    worker_loads: [16]f32 = [_]f32{0.0} ** 16,    // Per-worker load (0-1)
+    queue_imbalance: f32 = 0.0,                   // Load imbalance metric
+    total_pending: f32 = 0.0,                     // Total pending tasks
+    memory_pressure: f32 = 0.0,                   // Memory pressure (0-1)
+    
+    // CPU state
+    cpu_utilization: f32 = 0.0,                   // Overall CPU utilization
+    thermal_throttling: f32 = 0.0,                // Thermal throttling active
+    
+    // Temporal features
+    time_since_last_decision: f32 = 0.0,          // Time since last A3C decision
+    system_load: f32 = 0.0,                       // Background process load
+    
+    pub fn init() A3CSystemState {
+        return A3CSystemState{};
+    }
+    
+    /// Convert to array for neural network input (16 features)
+    pub fn toArray(self: A3CSystemState) [16]f32 {
+        var result: [16]f32 = undefined;
+        
+        // Worker loads (first 8 workers)
+        for (0..8) |i| {
+            result[i] = self.worker_loads[i];
+        }
+        
+        // System metrics
+        result[8] = self.queue_imbalance;
+        result[9] = self.total_pending;
+        result[10] = self.memory_pressure;
+        result[11] = self.cpu_utilization;
+        result[12] = self.thermal_throttling;
+        result[13] = self.time_since_last_decision;
+        result[14] = self.system_load;
+        result[15] = 0.0; // Reserved
+        
+        return result;
+    }
+};
+
+/// Lightweight neural network for A3C policy and value estimation
+pub const SimpleNeuralNetwork = struct {
+    // Network architecture: 32 input -> 64 hidden -> output
+    weights_input_hidden: [32 * 64]f32,    // Input to hidden layer weights
+    bias_hidden: [64]f32,                  // Hidden layer biases
+    weights_hidden_output: [64 * 16]f32,   // Hidden to output weights (max 16 workers)
+    bias_output: [16]f32,                  // Output layer biases
+    
+    // Learning parameters
+    learning_rate: f32,
+    
+    pub fn init(allocator: std.mem.Allocator, learning_rate: f32) !SimpleNeuralNetwork {
+        _ = allocator; // Not using allocator for this simple implementation
+        
+        var network = SimpleNeuralNetwork{
+            .weights_input_hidden = undefined,
+            .bias_hidden = undefined,
+            .weights_hidden_output = undefined,
+            .bias_output = undefined,
+            .learning_rate = learning_rate,
+        };
+        
+        // Xavier initialization for weights
+        var rng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.nanoTimestamp())));
+        const random = rng.random();
+        
+        // Initialize input->hidden weights
+        const input_std = @sqrt(2.0 / 32.0);
+        for (&network.weights_input_hidden) |*weight| {
+            weight.* = random.floatNorm(f32) * input_std;
+        }
+        
+        // Initialize hidden->output weights
+        const hidden_std = @sqrt(2.0 / 64.0);
+        for (&network.weights_hidden_output) |*weight| {
+            weight.* = random.floatNorm(f32) * hidden_std;
+        }
+        
+        // Initialize biases to zero
+        for (&network.bias_hidden) |*bias| bias.* = 0.0;
+        for (&network.bias_output) |*bias| bias.* = 0.0;
+        
+        return network;
+    }
+    
+    /// Forward pass: 32 inputs -> 16 outputs
+    pub fn forward(self: *const SimpleNeuralNetwork, input: [32]f32, num_workers: usize) [16]f32 {
+        var hidden: [64]f32 = undefined;
+        var output: [16]f32 = undefined;
+        
+        // Input to hidden layer (with ReLU activation)
+        for (0..64) |h| {
+            var sum: f32 = self.bias_hidden[h];
+            for (0..32) |i| {
+                sum += input[i] * self.weights_input_hidden[i * 64 + h];
+            }
+            hidden[h] = @max(0.0, sum); // ReLU activation
+        }
+        
+        // Hidden to output layer (with softmax for probability distribution)
+        var max_logit: f32 = -std.math.floatMax(f32);
+        for (0..num_workers) |o| {
+            var sum: f32 = self.bias_output[o];
+            for (0..64) |h| {
+                sum += hidden[h] * self.weights_hidden_output[h * 16 + o];
+            }
+            output[o] = sum;
+            max_logit = @max(max_logit, sum);
+        }
+        
+        // Softmax normalization
+        var sum_exp: f32 = 0.0;
+        for (0..num_workers) |o| {
+            output[o] = @exp(output[o] - max_logit);
+            sum_exp += output[o];
+        }
+        
+        for (0..num_workers) |o| {
+            output[o] /= sum_exp;
+        }
+        
+        // Zero out unused worker slots
+        for (num_workers..16) |o| {
+            output[o] = 0.0;
+        }
+        
+        return output;
+    }
+    
+    /// Simple gradient descent update (placeholder for full A3C implementation)
+    pub fn updateWeights(self: *SimpleNeuralNetwork, gradient: []const f32) void {
+        // Simple weight update - will be replaced with proper A3C gradients
+        for (self.weights_hidden_output[0..gradient.len], gradient) |*weight, grad| {
+            weight.* -= self.learning_rate * grad;
+        }
+    }
+};
+
+/// A3C scheduler for intelligent worker selection
+pub const A3CScheduler = struct {
+    // Neural networks
+    policy_network: SimpleNeuralNetwork,    // Actor network for action selection
+    value_network: SimpleNeuralNetwork,     // Critic network for value estimation
+    
+    // Configuration
+    config: *const Config,
+    exploration_rate: f32,
+    confidence_threshold: f32,
+    
+    // State tracking
+    last_decision_time: u64,
+    decision_count: u64,
+    
+    pub fn init(allocator: std.mem.Allocator, config: *const Config) !A3CScheduler {
+        return A3CScheduler{
+            .policy_network = try SimpleNeuralNetwork.init(allocator, config.a3c_learning_rate),
+            .value_network = try SimpleNeuralNetwork.init(allocator, config.a3c_learning_rate),
+            .config = config,
+            .exploration_rate = config.a3c_exploration_rate,
+            .confidence_threshold = config.a3c_confidence_threshold,
+            .last_decision_time = @as(u64, @intCast(std.time.nanoTimestamp())),
+            .decision_count = 0,
+        };
+    }
+    
+    /// Select optimal worker using A3C policy network
+    pub fn selectWorker(
+        self: *A3CScheduler,
+        task_features: TaskFeatures,
+        system_state: A3CSystemState,
+        num_workers: usize
+    ) usize {
+        // Combine features into input vector
+        var input: [32]f32 = undefined;
+        const task_array = task_features.toArray();
+        const state_array = system_state.toArray();
+        
+        // First 16: task features, next 16: system state
+        for (0..16) |i| {
+            input[i] = task_array[i];
+            input[i + 16] = state_array[i];
+        }
+        
+        // Get action probabilities from policy network
+        const action_probs = self.policy_network.forward(input, num_workers);
+        
+        // Select action (epsilon-greedy for exploration)
+        var rng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.nanoTimestamp())));
+        const random_val = rng.random().float(f32);
+        
+        const selected_worker = if (random_val < self.exploration_rate) 
+            rng.random().uintLessThan(usize, num_workers) // Explore
+        else 
+            argmax(action_probs[0..num_workers]); // Exploit
+        
+        // Update decision tracking
+        self.decision_count += 1;
+        self.last_decision_time = @as(u64, @intCast(std.time.nanoTimestamp()));
+        
+        return selected_worker;
+    }
+    
+    /// Get confidence in A3C decision vs fallback
+    pub fn getDecisionConfidence(
+        self: *A3CScheduler,
+        task_features: TaskFeatures,
+        system_state: A3CSystemState,
+        num_workers: usize
+    ) f32 {
+        // Combine features
+        var input: [32]f32 = undefined;
+        const task_array = task_features.toArray();
+        const state_array = system_state.toArray();
+        
+        for (0..16) |i| {
+            input[i] = task_array[i];
+            input[i + 16] = state_array[i];
+        }
+        
+        // Get action probabilities
+        const action_probs = self.policy_network.forward(input, num_workers);
+        
+        // Confidence = max probability (higher = more confident)
+        var max_prob: f32 = 0.0;
+        for (action_probs[0..num_workers]) |prob| {
+            max_prob = @max(max_prob, prob);
+        }
+        
+        return max_prob;
+    }
+    
+    /// Extract task features from task metadata
+    pub fn extractTaskFeatures(task: Task) TaskFeatures {
+        var features = TaskFeatures.init();
+        
+        // Extract from task priority
+        features.priority_level = switch (task.priority) {
+            .low => 0.0,
+            .normal => 0.5,
+            .high => 1.0,
+        };
+        
+        // Extract from data size hint
+        if (task.data_size_hint) |size| {
+            features.data_size_log2 = @min(@log2(@as(f32, @floatFromInt(size + 1))), 20.0) / 20.0;
+            features.computational_intensity = if (size < 1024) 0.8 else 0.3; // Small=compute, large=memory
+            features.memory_access_pattern = if (size < 512) 1.0 else 0.3; // Small=sequential, large=random
+        }
+        
+        // Latency sensitivity based on priority
+        features.latency_sensitivity = switch (task.priority) {
+            .high => 1.0,
+            .normal => 0.5,
+            .low => 0.2,
+        };
+        
+        return features;
+    }
+    
+    /// Capture current system state (simplified) - Worker type resolved at comptime
+    pub fn captureSystemState(workers: anytype) A3CSystemState {
+        var state = A3CSystemState.init();
+        
+        // Calculate worker loads and queue imbalance
+        var total_tasks: f32 = 0.0;
+        var max_load: f32 = 0.0;
+        var min_load: f32 = 1.0;
+        
+        for (workers, 0..) |worker, i| {
+            if (i >= 16) break;
+            
+            const queue_size = @as(f32, @floatFromInt(worker.getQueueSize()));
+            const load = @min(queue_size / 100.0, 1.0); // Normalize to [0,1]
+            
+            state.worker_loads[i] = load;
+            total_tasks += queue_size;
+            max_load = @max(max_load, load);
+            min_load = @min(min_load, load);
+        }
+        
+        state.total_pending = @min(total_tasks / 1000.0, 1.0);
+        state.queue_imbalance = if (max_load > 0.0) (max_load - min_load) / max_load else 0.0;
+        
+        // TODO: Integrate with actual system monitoring
+        state.cpu_utilization = 0.5; // Placeholder
+        state.memory_pressure = 0.3; // Placeholder
+        state.system_load = 0.2; // Placeholder
+        
+        return state;
+    }
+};
+
+/// Find index of maximum value in array
+fn argmax(values: []const f32) usize {
+    var max_idx: usize = 0;
+    var max_val = values[0];
+    
+    for (values[1..], 1..) |val, i| {
+        if (val > max_val) {
+            max_val = val;
+            max_idx = i;
+        }
+    }
+    
+    return max_idx;
+}
 
 // ============================================================================
 // Core Types
@@ -363,6 +746,9 @@ pub const ThreadPool = struct {
     fingerprint_registry: ?*fingerprint.FingerprintRegistry = null,
     advanced_selector: ?*advanced_worker_selection.AdvancedWorkerSelector = null,
     
+    // A3C Reinforcement Learning scheduler
+    a3c_scheduler: ?*A3CScheduler = null,
+    
     const Self = @This();
     
     const Worker = struct {
@@ -379,6 +765,21 @@ pub const ThreadPool = struct {
         // CPU affinity (v3)
         cpu_id: ?u32 = null,
         numa_node: ?u32 = null,
+        
+        /// Get the current queue size for this worker
+        pub fn getQueueSize(self: *const Worker) usize {
+            return switch (self.queue) {
+                .mutex => |*q| {
+                    // Sum up all priority queues
+                    var total: usize = 0;
+                    for (q.tasks) |queue| {
+                        total += queue.items.len;
+                    }
+                    return total;
+                },
+                .lockfree => |*q| q.size(),
+            };
+        }
     };
     
     const MutexQueue = struct {
@@ -552,6 +953,13 @@ pub const ThreadPool = struct {
             );
         }
         
+        // Initialize A3C Reinforcement Learning scheduler (Phase 7)
+        if (actual_config.enable_a3c_scheduling) {
+            self.a3c_scheduler = try allocator.create(A3CScheduler);
+            self.a3c_scheduler.?.* = try A3CScheduler.init(allocator, &actual_config);
+            std.log.info("🧠 A3C Reinforcement Learning scheduler enabled - intelligent adaptive worker selection", .{});
+        }
+        
         // Initialize Souper mathematical optimizations (Phase 6)
         if (actual_config.enable_souper_optimizations orelse true) {
             souper_integration.SouperIntegration.initialize();
@@ -632,6 +1040,10 @@ pub const ThreadPool = struct {
             self.allocator.destroy(selector);
         }
         
+        if (self.a3c_scheduler) |a3c| {
+            self.allocator.destroy(a3c);
+        }
+        
         self.allocator.free(self.workers);
         self.allocator.destroy(self);
     }
@@ -664,10 +1076,27 @@ pub const ThreadPool = struct {
         // Lightweight statistics update
         _ = self.stats.hot.tasks_submitted.fetchAdd(1, .monotonic);
         
-        // OPTIMIZED: Use round-robin worker selection instead of complex algorithm
-        // This eliminates the expensive selectWorker() call for most cases
-        const submission_count = self.stats.hot.tasks_submitted.load(.monotonic);
-        const worker_id = submission_count % self.workers.len;
+        // INTELLIGENT WORKER SELECTION: A3C vs round-robin
+        const worker_id = blk: {
+            if (self.a3c_scheduler) |a3c_sched| {
+                // Extract task features for A3C decision making
+                const task_features = A3CScheduler.extractTaskFeatures(task);
+                const system_state = A3CScheduler.captureSystemState(self.workers);
+                
+                // Get A3C confidence in decision
+                const confidence = a3c_sched.getDecisionConfidence(task_features, system_state, self.workers.len);
+                
+                // Use A3C if confidence is high enough, otherwise fallback to round-robin
+                if (confidence >= self.config.a3c_confidence_threshold) {
+                    break :blk a3c_sched.selectWorker(task_features, system_state, self.workers.len);
+                }
+            }
+            
+            // Default round-robin selection (A3C disabled or low confidence)
+            const submission_count = self.stats.hot.tasks_submitted.load(.monotonic);
+            break :blk submission_count % self.workers.len;
+        };
+        
         const worker = &self.workers[worker_id];
         
         switch (worker.queue) {
