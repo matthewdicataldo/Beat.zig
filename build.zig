@@ -898,6 +898,8 @@ pub fn build(b: *std.Build) void {
         .{ .name = "one_euro_filter", .source = "src/kernels/one_euro_filter.ispc", .description = "ISPC-optimized One Euro Filter for predictive scheduling" },
         .{ .name = "optimized_batch_kernels", .source = "src/kernels/optimized_batch_kernels.ispc", .description = "Ultra-optimized mega-batch kernels with minimized function call overhead" },
         .{ .name = "heartbeat_scheduling", .source = "src/kernels/heartbeat_scheduling.ispc", .description = "ISPC-optimized heartbeat scheduling and worker management system" },
+        .{ .name = "advanced_ispc_research", .source = "src/kernels/advanced_ispc_research.ispc", .description = "Advanced ISPC research: tasks, async, GPU targeting, cutting-edge features" },
+        .{ .name = "prediction_pipeline", .source = "src/kernels/prediction_pipeline.ispc", .description = "Comprehensive prediction system acceleration with transparent API integration" },
     };
     
     // Create ISPC kernel compilation steps
@@ -1014,6 +1016,53 @@ pub fn build(b: *std.Build) void {
         const run_heartbeat_kernels_test = b.addRunArtifact(heartbeat_kernels_test);
         const heartbeat_kernels_test_step = b.step("test-heartbeat-kernels", "Test ISPC heartbeat scheduling and worker management kernels");
         heartbeat_kernels_test_step.dependOn(&run_heartbeat_kernels_test.step);
+        
+        // Advanced ISPC Research Test Suite (Phase 3 Deep Dive)
+        const advanced_ispc_research_test = b.addTest(.{
+            .root_source_file = b.path("test_advanced_ispc_research.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        
+        // Link all ISPC kernels
+        for (ispc_obj_paths.items) |obj_path| {
+            advanced_ispc_research_test.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        
+        // Add ISPC header include path
+        advanced_ispc_research_test.addIncludePath(b.path("zig-cache/ispc"));
+        
+        // Depend on all ISPC compilation steps
+        for (ispc_steps.items) |ispc_step| {
+            advanced_ispc_research_test.step.dependOn(ispc_step);
+        }
+        
+        const run_advanced_ispc_research_test = b.addRunArtifact(advanced_ispc_research_test);
+        const advanced_ispc_research_test_step = b.step("test-advanced-ispc-research", "Test cutting-edge ISPC features: tasks, GPU, @ispc builtin prototype");
+        advanced_ispc_research_test_step.dependOn(&run_advanced_ispc_research_test.step);
+        
+        // Prediction Integration Test Suite (Production Integration)
+        const prediction_integration_test = b.addTest(.{
+            .root_source_file = b.path("test_prediction_integration.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        
+        // Link all ISPC kernels for comprehensive testing
+        for (ispc_obj_paths.items) |obj_path| {
+            prediction_integration_test.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        
+        prediction_integration_test.addIncludePath(b.path("zig-cache/ispc"));
+        
+        // Depend on all ISPC compilation steps
+        for (ispc_steps.items) |ispc_step| {
+            prediction_integration_test.step.dependOn(ispc_step);
+        }
+        
+        const run_prediction_integration_test = b.addRunArtifact(prediction_integration_test);
+        const prediction_integration_test_step = b.step("test-prediction-integration", "Test transparent ISPC prediction acceleration with 100% API compatibility");
+        prediction_integration_test_step.dependOn(&run_prediction_integration_test.step);
     }
     
     // All ISPC targets

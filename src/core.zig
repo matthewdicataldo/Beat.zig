@@ -15,6 +15,8 @@ pub const build_opts = @import("build_opts_new.zig");
 pub const comptime_work = @import("comptime_work.zig");
 pub const enhanced_errors = @import("enhanced_errors.zig");
 pub const fingerprint = @import("fingerprint.zig");
+pub const fingerprint_enhanced = @import("fingerprint_enhanced.zig");
+pub const ispc_prediction_integration = @import("ispc_prediction_integration.zig");
 pub const intelligent_decision = @import("intelligent_decision.zig");
 pub const predictive_accounting = @import("predictive_accounting.zig");
 pub const advanced_worker_selection = @import("advanced_worker_selection.zig");
@@ -570,6 +572,10 @@ pub const ThreadPool = struct {
                 }
             }
         }
+        
+        // Initialize ISPC acceleration for transparent performance enhancement
+        // This provides maximum out-of-the-box performance with zero API changes
+        fingerprint_enhanced.AutoAcceleration.init();
         
         return self;
     }
