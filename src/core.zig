@@ -28,6 +28,8 @@ pub const simd_classifier = @import("simd_classifier.zig");
 pub const simd_benchmark = @import("simd_benchmark.zig");
 pub const mathematical_optimizations = @import("mathematical_optimizations.zig");
 pub const souper_integration = @import("souper_integration.zig");
+// TODO: Re-enable A3C module after resolving WSL file system compilation issue
+// pub const a3c = @import("a3c.zig");
 
 // Version info
 pub const version = std.SemanticVersion{
