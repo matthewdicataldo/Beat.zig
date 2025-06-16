@@ -85,6 +85,28 @@ zig build test-parallel-work
 zig build test-affinity
 ```
 
+### Souper Superoptimization
+```bash
+# Setup Souper toolchain (30-60 minutes, one-time)
+./scripts/setup_souper.sh --background
+
+# Monitor setup progress
+./scripts/monitor_souper_progress.sh -i
+
+# Run comprehensive analysis (after setup complete)
+source souper_env.sh
+./scripts/run_souper_analysis.sh
+
+# Quick analysis (high-priority modules only)
+./scripts/run_souper_analysis.sh -q
+
+# Analyze specific module
+./scripts/run_souper_analysis.sh -m fingerprint
+
+# Note: Generated LLVM IR files are automatically organized in artifacts/llvm_ir/
+# Setup logs and progress files are stored in artifacts/souper/
+```
+
 ### Documentation
 ```bash
 # Generate API documentation
