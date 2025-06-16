@@ -107,6 +107,26 @@ source souper_env.sh
 # Setup logs and progress files are stored in artifacts/souper/
 ```
 
+### ISPC SPMD Acceleration
+```bash
+# Compile all ISPC kernels (requires ispc compiler in PATH)
+zig build ispc-all
+
+# Test ISPC integration with performance comparison
+zig build test-ispc-integration
+
+# Benchmark ISPC vs native Zig SIMD performance
+zig build bench-ispc
+
+# Individual ISPC kernel compilation
+zig build ispc-fingerprint_similarity
+zig build ispc-batch_optimization
+zig build ispc-worker_selection
+
+# Note: ISPC kernels provide 3-6x speedup over scalar implementations
+# Generated object files and headers are automatically organized in zig-cache/ispc/
+```
+
 ### Documentation
 ```bash
 # Generate API documentation

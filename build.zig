@@ -830,4 +830,207 @@ pub fn build(b: *std.Build) void {
         }
     }
     souper_all_step.dependOn(souper_whole_step);
+    
+    // ============================================================================
+    // ISPC Integration for SPMD Parallel Acceleration
+    // ============================================================================
+    
+    // Check for ISPC compiler availability
+    const ispc_available = checkISPCAvailable(b);
+    if (b.verbose and ispc_available) {
+        std.debug.print("ISPC compiler detected - enabling SPMD acceleration\n", .{});
+    } else if (b.verbose) {
+        std.debug.print("ISPC compiler not found - skipping SPMD acceleration\n", .{});
+    }
+    
+    // Helper function to create ISPC compilation steps
+    const ISPCStepBuilder = struct {
+        fn addISPCKernel(
+            builder: *std.Build,
+            kernel_name: []const u8,
+            source_path: []const u8,
+            description: []const u8,
+        ) ?struct { step: *std.Build.Step, obj_path: []const u8, header_path: []const u8 } {
+            if (!checkISPCAvailable(builder)) return null;
+            
+            // Create cache directory for ISPC artifacts
+            const cache_dir = "zig-cache/ispc";
+            std.fs.makeDirAbsolute(std.fs.path.join(builder.allocator, &.{ builder.build_root.path orelse ".", cache_dir }) catch return null) catch {};
+            
+            const obj_path = builder.fmt("{s}/{s}.o", .{ cache_dir, kernel_name });
+            const header_path = builder.fmt("{s}/{s}.h", .{ cache_dir, kernel_name });
+            
+            // Auto-detect optimal ISPC target
+            const ispc_target = detectOptimalISPCTarget();
+            
+            const addressing = if (@sizeOf(usize) == 8) "--addressing=64" else "--addressing=32";
+            
+            const ispc_cmd = builder.addSystemCommand(&[_][]const u8{
+                "ispc",
+                source_path,
+                "-o", obj_path,
+                "-h", header_path,
+                "--target", ispc_target,
+                "-O2",
+                addressing,
+            });
+            
+            const step = builder.step(
+                builder.fmt("ispc-{s}", .{kernel_name}),
+                builder.fmt("Compile ISPC kernel: {s}", .{description}),
+            );
+            step.dependOn(&ispc_cmd.step);
+            
+            return .{
+                .step = step,
+                .obj_path = obj_path,
+                .header_path = header_path,
+            };
+        }
+    };
+    
+    // ISPC kernel compilation targets
+    const ispc_kernels = [_]struct { name: []const u8, source: []const u8, description: []const u8 }{
+        .{ .name = "fingerprint_similarity", .source = "src/kernels/fingerprint_similarity.ispc", .description = "Task fingerprint similarity computation with SPMD parallelism" },
+        .{ .name = "fingerprint_similarity_soa", .source = "src/kernels/fingerprint_similarity_soa.ispc", .description = "SoA-optimized fingerprint similarity with vectorized memory access" },
+        .{ .name = "batch_optimization", .source = "src/kernels/batch_optimization.ispc", .description = "Batch formation optimization using multi-criteria SPMD scoring" },
+        .{ .name = "worker_selection", .source = "src/kernels/worker_selection.ispc", .description = "Advanced worker selection with topology-aware SPMD computation" },
+        .{ .name = "one_euro_filter", .source = "src/kernels/one_euro_filter.ispc", .description = "ISPC-optimized One Euro Filter for predictive scheduling" },
+        .{ .name = "optimized_batch_kernels", .source = "src/kernels/optimized_batch_kernels.ispc", .description = "Ultra-optimized mega-batch kernels with minimized function call overhead" },
+    };
+    
+    // Create ISPC kernel compilation steps
+    var ispc_steps = std.ArrayList(*std.Build.Step).init(b.allocator);
+    var ispc_obj_paths = std.ArrayList([]const u8).init(b.allocator);
+    
+    inline for (ispc_kernels) |kernel| {
+        if (ISPCStepBuilder.addISPCKernel(b, kernel.name, kernel.source, kernel.description)) |result| {
+            ispc_steps.append(result.step) catch {};
+            ispc_obj_paths.append(result.obj_path) catch {};
+        }
+    }
+    
+    // ISPC integration test with performance comparison
+    if (ispc_available) {
+        const ispc_integration_test = b.addTest(.{
+            .name = "test_ispc_integration",
+            .root_source_file = b.path("tests/test_ispc_integration.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        
+        // Link all ISPC kernels
+        for (ispc_obj_paths.items) |obj_path| {
+            ispc_integration_test.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        
+        // Add ISPC header include path
+        ispc_integration_test.addIncludePath(b.path("zig-cache/ispc"));
+        
+        // Depend on all ISPC compilation steps
+        for (ispc_steps.items) |ispc_step| {
+            ispc_integration_test.step.dependOn(ispc_step);
+        }
+        
+        ispc_integration_test.root_module.addImport("beat", zigpulse_module);
+        build_config.addBuildOptions(b, ispc_integration_test, auto_config);
+        
+        const run_ispc_integration_test = b.addRunArtifact(ispc_integration_test);
+        const ispc_integration_test_step = b.step("test-ispc-integration", "Test ISPC integration with performance comparison vs native SIMD");
+        ispc_integration_test_step.dependOn(&run_ispc_integration_test.step);
+        
+        // ISPC benchmark comparing SPMD vs native performance
+        const ispc_benchmark = b.addExecutable(.{
+            .name = "benchmark_ispc_performance",
+            .root_source_file = b.path("benchmarks/benchmark_ispc_performance.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        
+        // Link all ISPC kernels
+        for (ispc_obj_paths.items) |obj_path| {
+            ispc_benchmark.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        
+        ispc_benchmark.addIncludePath(b.path("zig-cache/ispc"));
+        
+        // Depend on all ISPC compilation steps
+        for (ispc_steps.items) |ispc_step| {
+            ispc_benchmark.step.dependOn(ispc_step);
+        }
+        
+        ispc_benchmark.root_module.addImport("beat", zigpulse_module);
+        build_config.addBuildOptions(b, ispc_benchmark, auto_config);
+        
+        const run_ispc_benchmark = b.addRunArtifact(ispc_benchmark);
+        const ispc_benchmark_step = b.step("bench-ispc", "Benchmark ISPC SPMD performance vs native Zig implementations");
+        ispc_benchmark_step.dependOn(&run_ispc_benchmark.step);
+        
+        // Optimized ISPC kernels test
+        const optimized_kernels_test = b.addExecutable(.{
+            .name = "test_optimized_kernels",
+            .root_source_file = b.path("test_optimized_kernels.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        
+        // Link all ISPC kernels
+        for (ispc_obj_paths.items) |obj_path| {
+            optimized_kernels_test.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        
+        optimized_kernels_test.addIncludePath(b.path("zig-cache/ispc"));
+        
+        // Depend on all ISPC compilation steps
+        for (ispc_steps.items) |ispc_step| {
+            optimized_kernels_test.step.dependOn(ispc_step);
+        }
+        
+        const run_optimized_kernels_test = b.addRunArtifact(optimized_kernels_test);
+        const optimized_kernels_test_step = b.step("test-optimized-kernels", "Test ultra-optimized mega-batch ISPC kernels with overhead reduction");
+        optimized_kernels_test_step.dependOn(&run_optimized_kernels_test.step);
+    }
+    
+    // All ISPC targets
+    const ispc_all_step = b.step("ispc-all", "Compile all ISPC kernels for SPMD acceleration");
+    for (ispc_steps.items) |ispc_step| {
+        ispc_all_step.dependOn(ispc_step);
+    }
+}
+
+// Helper function to check ISPC compiler availability
+fn checkISPCAvailable(b: *std.Build) bool {
+    const result = std.process.Child.run(.{
+        .allocator = b.allocator,
+        .argv = &[_][]const u8{ "ispc", "--version" },
+    }) catch return false;
+    
+    defer b.allocator.free(result.stdout);
+    defer b.allocator.free(result.stderr);
+    
+    return result.term == .Exited and result.term.Exited == 0;
+}
+
+// Auto-detect optimal ISPC target based on CPU capabilities
+fn detectOptimalISPCTarget() []const u8 {
+    const builtin = @import("builtin");
+    const features = std.Target.x86.featureSetHas;
+    
+    if (builtin.cpu.arch == .x86_64) {
+        if (features(builtin.cpu.features, .avx512f)) {
+            return "avx512skx-i32x16";
+        } else if (features(builtin.cpu.features, .avx2)) {
+            return "avx2-i32x8";
+        } else if (features(builtin.cpu.features, .avx)) {
+            return "avx1-i32x8";
+        } else if (features(builtin.cpu.features, .sse4_1)) {
+            return "sse4-i32x4";
+        } else {
+            return "sse2-i32x4";
+        }
+    } else if (builtin.cpu.arch == .aarch64) {
+        return "neon-i32x4";
+    } else {
+        return "host";
+    }
 }
