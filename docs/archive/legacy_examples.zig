@@ -1,7 +1,7 @@
 const std = @import("std");
-const zigpulse = @import("zigpulse.zig");
+const beat = @import("beat.zig");
 
-// Comprehensive examples demonstrating ZigPulse features
+// Comprehensive examples demonstrating Beat.zig features
 
 // =============================================================================
 // Helper Functions
@@ -28,7 +28,7 @@ fn example_basic_thread_pool() !void {
     std.debug.print("\n=== Example 1: Basic Thread Pool ===\n", .{});
     
     const allocator = std.heap.page_allocator;
-    const pool = try zigpulse.createPool(allocator);
+    const pool = try beat.createPool(allocator);
     defer pool.deinit();
     
     // Simple task submission
@@ -60,7 +60,7 @@ fn example_futures() !void {
     std.debug.print("\n=== Example 2: Futures with Results ===\n", .{});
     
     const allocator = std.heap.page_allocator;
-    const pool = try zigpulse.createPoolWithConfig(allocator, .{ .num_workers = 4 });
+    const pool = try beat.createPoolWithConfig(allocator, .{ .num_workers = 4 });
     defer pool.deinit();
     
     // Compute fibonacci numbers in parallel
@@ -72,7 +72,7 @@ fn example_futures() !void {
     }.run;
     
     var nums = [_]u32{ 10, 20, 30, 35 };
-    var futures: [4]zigpulse.Future(u64) = undefined;
+    var futures: [4]beat.Future(u64) = undefined;
     
     // Spawn tasks
     for (&nums, 0..) |*n, i| {
@@ -94,7 +94,7 @@ fn example_priority_scheduling() !void {
     std.debug.print("\n=== Example 3: Priority Scheduling ===\n", .{});
     
     const allocator = std.heap.page_allocator;
-    const pool = try zigpulse.createPool(allocator);
+    const pool = try beat.createPool(allocator);
     defer pool.deinit();
     
     const priority_task = struct {
@@ -126,7 +126,7 @@ fn example_parallel_patterns() !void {
     std.debug.print("\n=== Example 4: Parallel Patterns ===\n", .{});
     
     const allocator = std.heap.page_allocator;
-    const pool = try zigpulse.createPool(allocator);
+    const pool = try beat.createPool(allocator);
     defer pool.deinit();
     
     // Parallel for-each
@@ -160,7 +160,7 @@ fn example_parallel_patterns() !void {
         }
     }.run;
     
-    const results = try zigpulse.join2(pool, i32, i32, task1, task2);
+    const results = try beat.join2(pool, i32, i32, task1, task2);
     std.debug.print("Fork-join results: {} and {}\n", .{ results.left, results.right });
 }
 
@@ -172,18 +172,18 @@ fn example_heartbeat_scheduling() !void {
     std.debug.print("\n=== Example 5: Heartbeat Scheduling (V2) ===\n", .{});
     
     const allocator = std.heap.page_allocator;
-    const config = zigpulse.Config{
+    const config = beat.Config{
         .num_workers = 4,
         .enable_heartbeat = true,
         .heartbeat_interval_us = 100,
         .promotion_threshold = 10,
     };
     
-    const pool = try zigpulse.createPoolWithConfig(allocator, config);
+    const pool = try beat.createPoolWithConfig(allocator, config);
     defer pool.deinit();
     
     // Initialize thread-local state
-    zigpulse.initThread(pool);
+    beat.initThread(pool);
     
     std.debug.print("Heartbeat scheduler enabled with {}μs interval\n", .{config.heartbeat_interval_us});
     
@@ -207,12 +207,12 @@ fn example_heartbeat_scheduling() !void {
     
     // Execute multiple pcalls
     for (0..5) |i| {
-        var light_future = zigpulse.pcall(i32, light_work);
+        var light_future = beat.pcall(i32, light_work);
         const light_result = try light_future.get();
         std.debug.print("Light work {}: result = {}\n", .{ i, light_result });
         
         if (i >= 3) {
-            var heavy_future = zigpulse.pcall(u64, heavy_work);
+            var heavy_future = beat.pcall(u64, heavy_work);
             const heavy_result = try heavy_future.get();
             std.debug.print("Heavy work {}: result = {} (likely promoted)\n", .{ i, heavy_result });
         }
@@ -229,10 +229,10 @@ fn example_zero_overhead() !void {
     std.debug.print("\n=== Example 6: Zero-Overhead pcallMinimal ===\n", .{});
     
     const allocator = std.heap.page_allocator;
-    const pool = try zigpulse.createPool(allocator);
+    const pool = try beat.createPool(allocator);
     defer pool.deinit();
     
-    zigpulse.initThread(pool);
+    beat.initThread(pool);
     
     const compute = struct {
         fn run() i32 {
@@ -245,7 +245,7 @@ fn example_zero_overhead() !void {
     }.run;
     
     // This has zero overhead in release mode
-    const result = zigpulse.pcallMinimal(i32, compute);
+    const result = beat.pcallMinimal(i32, compute);
     std.debug.print("Result: {} (computed with zero overhead in release)\n", .{result});
 }
 
@@ -257,7 +257,7 @@ fn example_real_world() !void {
     std.debug.print("\n=== Example 7: Real-World Use Cases ===\n", .{});
     
     const allocator = std.heap.page_allocator;
-    const pool = try zigpulse.createPool(allocator);
+    const pool = try beat.createPool(allocator);
     defer pool.deinit();
     
     // Parallel HTTP request parsing (simulated)
@@ -327,7 +327,7 @@ fn example_performance_comparison() !void {
     // Test different configurations
     const configs = [_]struct {
         name: []const u8,
-        config: zigpulse.Config,
+        config: beat.Config,
     }{
         .{
             .name = "Basic (V1)",
@@ -357,7 +357,7 @@ fn example_performance_comparison() !void {
     for (configs) |test_config| {
         std.debug.print("\n--- {s} Configuration ---\n", .{test_config.name});
         
-        const pool = try zigpulse.createPoolWithConfig(allocator, test_config.config);
+        const pool = try beat.createPoolWithConfig(allocator, test_config.config);
         defer pool.deinit();
         
         var iterations: u32 = 10000;

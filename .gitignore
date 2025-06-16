@@ -28,3 +28,24 @@ zigpulse_unified_example
 benchmark
 examples
 demo
+
+# Souper superoptimization artifacts
+*.ll
+*.bc
+souper_*.log
+souper_*.txt
+souper_*.pid
+souper_env.sh
+beat_souper_*
+/third_party/souper/third_party/
+nohup.out
+
+# LLVM artifacts
+llvm-*.log
+*.ninja_deps
+*.ninja_log
+
+# Temporary build files
+/tmp/
+*.tmp
+*.temp
