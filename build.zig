@@ -897,6 +897,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "worker_selection", .source = "src/kernels/worker_selection.ispc", .description = "Advanced worker selection with topology-aware SPMD computation" },
         .{ .name = "one_euro_filter", .source = "src/kernels/one_euro_filter.ispc", .description = "ISPC-optimized One Euro Filter for predictive scheduling" },
         .{ .name = "optimized_batch_kernels", .source = "src/kernels/optimized_batch_kernels.ispc", .description = "Ultra-optimized mega-batch kernels with minimized function call overhead" },
+        .{ .name = "heartbeat_scheduling", .source = "src/kernels/heartbeat_scheduling.ispc", .description = "ISPC-optimized heartbeat scheduling and worker management system" },
     };
     
     // Create ISPC kernel compilation steps
@@ -989,6 +990,30 @@ pub fn build(b: *std.Build) void {
         const run_optimized_kernels_test = b.addRunArtifact(optimized_kernels_test);
         const optimized_kernels_test_step = b.step("test-optimized-kernels", "Test ultra-optimized mega-batch ISPC kernels with overhead reduction");
         optimized_kernels_test_step.dependOn(&run_optimized_kernels_test.step);
+        
+        // Heartbeat scheduling ISPC kernels test
+        const heartbeat_kernels_test = b.addExecutable(.{
+            .name = "test_heartbeat_kernels",
+            .root_source_file = b.path("test_heartbeat_kernels.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        
+        // Link all ISPC kernels
+        for (ispc_obj_paths.items) |obj_path| {
+            heartbeat_kernels_test.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        
+        heartbeat_kernels_test.addIncludePath(b.path("zig-cache/ispc"));
+        
+        // Depend on all ISPC compilation steps
+        for (ispc_steps.items) |ispc_step| {
+            heartbeat_kernels_test.step.dependOn(ispc_step);
+        }
+        
+        const run_heartbeat_kernels_test = b.addRunArtifact(heartbeat_kernels_test);
+        const heartbeat_kernels_test_step = b.step("test-heartbeat-kernels", "Test ISPC heartbeat scheduling and worker management kernels");
+        heartbeat_kernels_test_step.dependOn(&run_heartbeat_kernels_test.step);
     }
     
     // All ISPC targets

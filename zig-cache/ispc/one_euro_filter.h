@@ -42,6 +42,7 @@ struct OneEuroState {
     float min_cutoff;
     float beta;
     float derivate_cutoff;
+    float prev_timestamp;
 };
 #endif
 

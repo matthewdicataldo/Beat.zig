@@ -16,6 +16,7 @@ struct OneEuroState {
     float min_cutoff;       // Minimum cutoff frequency
     float beta;             // Derivative cutoff coefficient
     float derivate_cutoff;  // Derivative cutoff frequency
+    float prev_timestamp;   // Previous timestamp for dt calculation
 };
 
 // SPMD One Euro Filter processing for multiple predictions
@@ -35,6 +36,7 @@ export void ispc_one_euro_filter_batch(
             // Initialize filter state
             state.x_prev = raw_value;
             state.dx_prev = 0.0f;
+            state.prev_timestamp = timestamp;
             state.initialized = true;
             filtered_values[i] = raw_value;
             states[i] = state;
@@ -42,7 +44,7 @@ export void ispc_one_euro_filter_batch(
         }
         
         // Compute time delta (ensure positive)
-        float dt = max(timestamp - (i > 0 ? timestamps[i-1] : timestamp), 0.001f);
+        float dt = max(timestamp - state.prev_timestamp, 0.001f);
         
         // Compute derivative
         float dx = (raw_value - state.x_prev) / dt;
@@ -61,6 +63,7 @@ export void ispc_one_euro_filter_batch(
         // Update state
         state.x_prev = filtered;
         state.dx_prev = dx_filtered;
+        state.prev_timestamp = timestamp;
         
         // Store results
         filtered_values[i] = filtered;
@@ -92,7 +95,7 @@ export void ispc_compute_prediction_confidence(
         
         // Apply temporal decay for older predictions
         if (i > 0) {
-            float time_decay = exp(-0.1f * (timestamps[i] - timestamps[0]));
+            float time_decay = exp(-0.1f * (timestamps[i] - timestamps[i]));
             confidence *= time_decay;
         }
         
