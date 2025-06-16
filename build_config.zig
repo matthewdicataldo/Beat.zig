@@ -40,10 +40,6 @@ pub const BuildConfig = struct {
     enable_topology_aware: bool,
     enable_numa_aware: bool,
     
-    // GPU/SYCL configuration
-    sycl_available: bool,
-    sycl_implementation: ?[]const u8,
-    enable_gpu_integration: bool,
 };
 
 /// Detect system configuration at build time
@@ -69,9 +65,6 @@ pub fn detectBuildConfig(b: *std.Build, target: std.Build.ResolvedTarget, optimi
         .one_euro_beta = 0.1,
         .enable_topology_aware = true,
         .enable_numa_aware = true,
-        .sycl_available = false,
-        .sycl_implementation = null,
-        .enable_gpu_integration = false,
     };
     
     // Detect CPU count (cross-platform)
@@ -88,7 +81,6 @@ pub fn detectBuildConfig(b: *std.Build, target: std.Build.ResolvedTarget, optimi
     applyTargetOptimizations(&config, target, optimize);
     
     // Detect SYCL availability
-    detectSyclAvailability(&config, b);
     
     return config;
 }
@@ -284,13 +276,6 @@ pub fn addBuildOptions(b: *std.Build, exe: *std.Build.Step.Compile, config: Buil
     options.addOption(bool, "is_release_fast_build", config.is_release_fast);
     
     // GPU/SYCL configuration
-    options.addOption(bool, "sycl_available", config.sycl_available);
-    options.addOption(bool, "enable_gpu_integration", config.enable_gpu_integration);
-    if (config.sycl_implementation) |impl| {
-        options.addOption([]const u8, "sycl_implementation", impl);
-    } else {
-        options.addOption(?[]const u8, "sycl_implementation", null);
-    }
     
     exe.root_module.addOptions("build_config", options);
 }
@@ -328,87 +313,9 @@ pub fn printConfigSummary(config: BuildConfig) void {
     
     // GPU/SYCL configuration
     std.debug.print("\nGPU Integration:\n", .{});
-    std.debug.print("SYCL Available: {}\n", .{config.sycl_available});
-    if (config.sycl_implementation) |impl| {
-        std.debug.print("SYCL Implementation: {s}\n", .{impl});
-    }
-    std.debug.print("GPU Integration Enabled: {}\n", .{config.enable_gpu_integration});
     std.debug.print("=====================================\n\n", .{});
 }
 
-/// Detect SYCL SDK availability at build time
-fn detectSyclAvailability(config: *BuildConfig, b: *std.Build) void {
-    _ = b; // Build context for future use
-    
-    // Check for common SYCL environment variables
-    const env_vars = [_][]const u8{
-        "ONEAPI_ROOT",           // Intel oneAPI
-        "ACPP_ROOT",             // AdaptiveCpp (hipSYCL)
-        "HIPSYCL_INSTALL_PREFIX", // hipSYCL legacy
-        "COMPUTECPP_PACKAGE_ROOT_DIR", // ComputeCpp
-        "TRISYCL_INCLUDE_DIR",   // triSYCL
-    };
-    
-    const implementations = [_][]const u8{
-        "Intel oneAPI DPC++",
-        "AdaptiveCpp/hipSYCL",
-        "hipSYCL",
-        "ComputeCpp",
-        "triSYCL",
-    };
-    
-    for (env_vars, implementations) |env_var, impl| {
-        if (std.process.getEnvVarOwned(std.heap.page_allocator, env_var)) |_| {
-            config.sycl_available = true;
-            config.sycl_implementation = impl;
-            config.enable_gpu_integration = true;
-            break;
-        } else |_| {
-            // Continue checking other implementations
-        }
-    }
-    
-    // Alternative detection: Check for SYCL compilers in PATH
-    if (!config.sycl_available) {
-        const compilers = [_][]const u8{ "dpcpp", "acpp", "syclcc", "compute++" };
-        const compiler_names = [_][]const u8{ "Intel DPC++", "AdaptiveCpp", "hipSYCL", "ComputeCpp" };
-        
-        for (compilers, compiler_names) |compiler, name| {
-            // Try to run 'which compiler' to check if it exists
-            const result = std.process.Child.run(.{
-                .allocator = std.heap.page_allocator,
-                .argv = &[_][]const u8{ "which", compiler },
-            }) catch continue;
-            
-            defer std.heap.page_allocator.free(result.stdout);
-            defer std.heap.page_allocator.free(result.stderr);
-            
-            if (result.term.Exited == 0 and result.stdout.len > 0) {
-                config.sycl_available = true;
-                config.sycl_implementation = name;
-                config.enable_gpu_integration = true;
-                break;
-            }
-        }
-    }
-    
-    // If SYCL is available, enable GPU integration only for suitable targets
-    if (config.sycl_available) {
-        // GPU integration is most beneficial for x86_64 and aarch64
-        // and primarily on Linux/Windows platforms
-        const suitable_arch = switch (config.target_arch) {
-            .x86_64, .aarch64 => true,
-            else => false,
-        };
-        
-        const suitable_os = switch (config.target_os) {
-            .linux, .windows, .macos => true,
-            else => false,
-        };
-        
-        config.enable_gpu_integration = suitable_arch and suitable_os;
-    }
-}
 
 // ============================================================================
 // Target-Specific Optimizations

@@ -513,44 +513,6 @@ pub fn build(b: *std.Build) void {
     const simd_benchmark_test_step = b.step("test-simd-benchmark", "Test comprehensive SIMD benchmarking and validation framework");
     simd_benchmark_test_step.dependOn(&run_simd_benchmark_test.step);
     
-    // GPU integration test
-    const gpu_integration_test = b.addTest(.{
-        .root_source_file = b.path("tests/test_gpu_integration.zig"),
-        .target = target,
-        .optimize = .Debug,
-    });
-    gpu_integration_test.root_module.addImport("beat", zigpulse_module);
-    build_config.addBuildOptions(b, gpu_integration_test, auto_config);
-    
-    const run_gpu_integration_test = b.addRunArtifact(gpu_integration_test);
-    const gpu_integration_test_step = b.step("test-gpu-integration", "Test GPU integration with SYCL C++ wrapper and device management");
-    gpu_integration_test_step.dependOn(&run_gpu_integration_test.step);
-    
-    // GPU classifier test
-    const gpu_classifier_test = b.addTest(.{
-        .root_source_file = b.path("tests/test_gpu_classifier.zig"),
-        .target = target,
-        .optimize = .Debug,
-    });
-    gpu_classifier_test.root_module.addImport("beat", zigpulse_module);
-    build_config.addBuildOptions(b, gpu_classifier_test, auto_config);
-    
-    const run_gpu_classifier_test = b.addRunArtifact(gpu_classifier_test);
-    const gpu_classifier_test_step = b.step("test-gpu-classifier", "Test automatic GPU suitability detection and task classification");
-    gpu_classifier_test_step.dependOn(&run_gpu_classifier_test.step);
-    
-    // SYCL detection test
-    const sycl_detection_test = b.addTest(.{
-        .root_source_file = b.path("tests/test_sycl_detection.zig"),
-        .target = target,
-        .optimize = .Debug,
-    });
-    sycl_detection_test.root_module.addImport("beat", zigpulse_module);
-    build_config.addBuildOptions(b, sycl_detection_test, auto_config);
-    
-    const run_sycl_detection_test = b.addRunArtifact(sycl_detection_test);
-    const sycl_detection_test_step = b.step("test-sycl-detection", "Test SYCL SDK detection and build system integration");
-    sycl_detection_test_step.dependOn(&run_sycl_detection_test.step);
     
     // ML-based classification integration test (Task 3.2.2)
     const ml_integration_test = b.addTest(.{

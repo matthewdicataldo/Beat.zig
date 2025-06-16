@@ -26,10 +26,6 @@ pub const simd_batch = @import("simd_batch.zig");
 pub const simd_queue = @import("simd_queue.zig");
 pub const simd_classifier = @import("simd_classifier.zig");
 pub const simd_benchmark = @import("simd_benchmark.zig");
-pub const gpu_integration = @import("gpu_integration.zig");
-pub const mock_sycl = @import("mock_sycl.zig");
-pub const gpu_classifier = @import("gpu_classifier.zig");
-pub const sycl_detection = @import("sycl_detection.zig");
 pub const mathematical_optimizations = @import("mathematical_optimizations.zig");
 pub const souper_integration = @import("souper_integration.zig");
 
