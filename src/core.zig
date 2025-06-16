@@ -30,6 +30,8 @@ pub const gpu_integration = @import("gpu_integration.zig");
 pub const mock_sycl = @import("mock_sycl.zig");
 pub const gpu_classifier = @import("gpu_classifier.zig");
 pub const sycl_detection = @import("sycl_detection.zig");
+pub const mathematical_optimizations = @import("mathematical_optimizations.zig");
+pub const souper_integration = @import("souper_integration.zig");
 
 // Version info
 pub const version = std.SemanticVersion{
@@ -93,6 +95,9 @@ pub const Config = struct {
     memory_debugging: bool = false,               // Enhanced memory tracking
     task_tracing: bool = false,                   // Individual task execution tracing
     scheduler_profiling: bool = false,            // Detailed scheduler performance profiling
+    
+    // Souper mathematical optimizations (Phase 6)
+    enable_souper_optimizations: ?bool = null,    // null = auto-enable, true/false = force on/off
     deadlock_detection: bool = false,             // Runtime deadlock detection
     resource_leak_detection: bool = false,        // Resource cleanup validation
     
@@ -547,6 +552,12 @@ pub const ThreadPool = struct {
                 self.decision_framework,
                 null  // SIMD registry not available yet
             );
+        }
+        
+        // Initialize Souper mathematical optimizations (Phase 6)
+        if (actual_config.enable_souper_optimizations orelse true) {
+            souper_integration.SouperIntegration.initialize();
+            std.log.info("🔬 Souper mathematical optimizations enabled - formally verified performance", .{});
         }
         
         // Initialize workers

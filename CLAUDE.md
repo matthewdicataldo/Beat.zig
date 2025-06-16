@@ -103,6 +103,12 @@ source souper_env.sh
 # Analyze specific module
 ./scripts/run_souper_analysis.sh -m fingerprint
 
+# Test Souper mathematical optimizations integration
+zig build test-souper-integration
+
+# Test Souper mathematical optimizations (simple, without ISPC dependencies)
+zig build test-souper-simple
+
 # Note: Generated LLVM IR files are automatically organized in artifacts/llvm_ir/
 # Setup logs and progress files are stored in artifacts/souper/
 ```

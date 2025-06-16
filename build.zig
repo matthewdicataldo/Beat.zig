@@ -1065,6 +1065,30 @@ pub fn build(b: *std.Build) void {
         prediction_integration_test_step.dependOn(&run_prediction_integration_test.step);
     }
     
+    // Souper mathematical optimization integration test
+    const souper_integration_test = b.addTest(.{
+        .root_source_file = b.path("test_souper_integration.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    souper_integration_test.root_module.addImport("beat", zigpulse_module);
+    
+    const run_souper_integration_test = b.addRunArtifact(souper_integration_test);
+    const souper_integration_test_step = b.step("test-souper-integration", "Test Souper mathematical optimizations with formal verification");
+    souper_integration_test_step.dependOn(&run_souper_integration_test.step);
+    
+    // Souper simple test (without ISPC dependencies)
+    const souper_simple_test = b.addTest(.{
+        .root_source_file = b.path("test_souper_simple.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    souper_simple_test.root_module.addImport("beat", zigpulse_module);
+    
+    const run_souper_simple_test = b.addRunArtifact(souper_simple_test);
+    const souper_simple_test_step = b.step("test-souper-simple", "Test Souper mathematical optimizations without ISPC dependencies");
+    souper_simple_test_step.dependOn(&run_souper_simple_test.step);
+    
     // All ISPC targets
     const ispc_all_step = b.step("ispc-all", "Compile all ISPC kernels for SPMD acceleration");
     for (ispc_steps.items) |ispc_step| {

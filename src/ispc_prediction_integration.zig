@@ -67,7 +67,7 @@ pub const PredictionAccelerator = struct {
     config: AcceleratorConfig,
     fallback_stats: FallbackStats,
     
-    const AcceleratorConfig = struct {
+    pub const AcceleratorConfig = struct {
         enable_ispc: bool = true,
         auto_detection: bool = true,
         prefer_accuracy: bool = false, // If true, always use verified native implementations
@@ -216,7 +216,7 @@ pub const PredictionAccelerator = struct {
         const count = worker_loads.len;
         
         if (shouldUseISPC(count, ISPC_WORKER_THRESHOLD)) {
-            const numa_pref = if (task_numa_preference) |pref| @intCast(pref) else -1;
+            const numa_pref = if (task_numa_preference) |pref| @as(i32, @intCast(pref)) else -1;
             self.scoreWorkersISPC(worker_loads, numa_distances, prediction_accuracies, worker_scores, numa_pref) catch {
                 self.fallback_stats.ispc_failures += 1;
                 self.scoreWorkersNative(worker_loads, numa_distances, prediction_accuracies, worker_scores, task_numa_preference);
@@ -250,7 +250,7 @@ pub const PredictionAccelerator = struct {
         if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
         
         // Convert fingerprints to u64 arrays for ISPC
-        const count = @intCast(i32, fingerprints_a.len);
+        const count = @as(i32, @intCast(fingerprints_a.len));
         
         // TODO: Consider memory pooling for frequent allocations
         var a_buffer = try std.heap.page_allocator.alloc(u64, fingerprints_a.len * 2);
@@ -261,14 +261,14 @@ pub const PredictionAccelerator = struct {
         // Pack fingerprints into u64 arrays
         for (fingerprints_a, 0..) |fp, i| {
             const bits = @as(u128, @bitCast(fp));
-            a_buffer[i * 2] = @truncate(u64, bits);
-            a_buffer[i * 2 + 1] = @truncate(u64, bits >> 64);
+            a_buffer[i * 2] = @as(u64, @truncate(bits));
+            a_buffer[i * 2 + 1] = @as(u64, @truncate(bits >> 64));
         }
         
         for (fingerprints_b, 0..) |fp, i| {
             const bits = @as(u128, @bitCast(fp));
-            b_buffer[i * 2] = @truncate(u64, bits);
-            b_buffer[i * 2 + 1] = @truncate(u64, bits >> 64);
+            b_buffer[i * 2] = @as(u64, @truncate(bits));
+            b_buffer[i * 2 + 1] = @as(u64, @truncate(bits >> 64));
         }
         
         // Call ISPC kernel
@@ -288,7 +288,7 @@ pub const PredictionAccelerator = struct {
         _ = self;
         if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
         
-        const count = @intCast(i32, fingerprints.len);
+        const count = @as(i32, @intCast(fingerprints.len));
         
         var fingerprint_buffer = try std.heap.page_allocator.alloc(u64, fingerprints.len * 2);
         defer std.heap.page_allocator.free(fingerprint_buffer);
@@ -296,8 +296,8 @@ pub const PredictionAccelerator = struct {
         // Pack fingerprints
         for (fingerprints, 0..) |fp, i| {
             const bits = @as(u128, @bitCast(fp));
-            fingerprint_buffer[i * 2] = @truncate(u64, bits);
-            fingerprint_buffer[i * 2 + 1] = @truncate(u64, bits >> 64);
+            fingerprint_buffer[i * 2] = @as(u64, @truncate(bits));
+            fingerprint_buffer[i * 2 + 1] = @as(u64, @truncate(bits >> 64));
         }
         
         ispc_compute_similarity_matrix(
@@ -318,13 +318,13 @@ pub const PredictionAccelerator = struct {
         _ = self;
         if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
         
-        const count = @intCast(i32, measurements.len);
+        const count = @as(i32, @intCast(measurements.len));
         const dt_scale = 1.0 / 1_000_000_000.0; // ns to seconds
         
         ispc_process_one_euro_filter_batch(
             measurements.ptr,
             timestamps.ptr,
-            @ptrCast([*]fingerprint.OneEuroState, states.ptr),
+            @as([*]fingerprint.OneEuroState, @ptrCast(states.ptr)),
             results.ptr,
             count,
             dt_scale,
@@ -341,7 +341,7 @@ pub const PredictionAccelerator = struct {
         _ = self;
         if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
         
-        const count = @intCast(i32, profiles.len);
+        const count = @as(i32, @intCast(profiles.len));
         
         // Extract data for ISPC processing
         var execution_counts = try std.heap.page_allocator.alloc(u32, profiles.len);
@@ -365,7 +365,7 @@ pub const PredictionAccelerator = struct {
             accuracy_scores.ptr,
             temporal_scores.ptr,
             variance_scores.ptr,
-            @ptrCast([*]intelligent_decision.MultiFactorConfidence, confidence_results.ptr),
+            @as([*]intelligent_decision.MultiFactorConfidence, @ptrCast(confidence_results.ptr)),
             count,
         );
     }
@@ -381,7 +381,7 @@ pub const PredictionAccelerator = struct {
         _ = self;
         if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
         
-        const count = @intCast(i32, worker_loads.len);
+        const count = @as(i32, @intCast(worker_loads.len));
         
         ispc_score_workers_batch(
             worker_loads.ptr,
@@ -482,7 +482,7 @@ pub const PredictionAccelerator = struct {
         // Runtime ISPC availability check
         if (builtin.mode == .Debug) {
             // In debug mode, prefer native for better debugging
-            return count >= threshold * 2;
+            return false; // Disable ISPC in debug/test mode
         }
         
         return count >= threshold;
@@ -505,6 +505,7 @@ pub fn getGlobalAccelerator() *PredictionAccelerator {
     }
     return &global_accelerator.?;
 }
+
 
 /// Transparent API extensions for existing modules
 pub const TransparentAPI = struct {

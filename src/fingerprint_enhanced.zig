@@ -22,7 +22,7 @@ pub const FingerprintRegistry = struct {
     
     pub fn init(allocator: std.mem.Allocator) !Self {
         return Self{
-            .base_registry = try fingerprint.FingerprintRegistry.init(allocator),
+            .base_registry = fingerprint.FingerprintRegistry.init(allocator),
             .accelerator = ispc_integration.getGlobalAccelerator(),
         };
     }
@@ -115,7 +115,7 @@ pub const FingerprintRegistry = struct {
         results: []f64,
     ) !void {
         // Extract hashes for ISPC lookup
-        var hashes = try self.base_registry.allocator.alloc(u64, fingerprints.len);
+        const hashes = try self.base_registry.allocator.alloc(u64, fingerprints.len);
         defer self.base_registry.allocator.free(hashes);
         
         for (fingerprints, hashes) |fp, *hash| {
@@ -123,16 +123,16 @@ pub const FingerprintRegistry = struct {
         }
         
         // ISPC-accelerated lookup
-        var predictions = try self.base_registry.allocator.alloc(f32, fingerprints.len);
+        const predictions = try self.base_registry.allocator.alloc(f32, fingerprints.len);
         defer self.base_registry.allocator.free(predictions);
-        var confidences = try self.base_registry.allocator.alloc(f32, fingerprints.len);
+        const confidences = try self.base_registry.allocator.alloc(f32, fingerprints.len);
         defer self.base_registry.allocator.free(confidences);
-        var cache_hits = try self.base_registry.allocator.alloc(bool, fingerprints.len);
+        const cache_hits = try self.base_registry.allocator.alloc(bool, fingerprints.len);
         defer self.base_registry.allocator.free(cache_hits);
         
         // TODO: Implement ispc_lookup_predictions_batch kernel call
         // For now, fall back to native implementation
-        return error.NotImplemented;
+        self.getPredictedCyclesBatchNative(fingerprints, results);
     }
     
     fn getPredictedCyclesBatchNative(
@@ -336,11 +336,11 @@ test "enhanced fingerprint compatibility" {
         .seasonal_pattern = 3,
         .variance_level = 4,
         .expected_cycles_log2 = 12,
-        .memory_bandwidth_log2 = 8,
-        .branch_prediction_difficulty = 6,
-        .vectorization_efficiency = 9,
-        .cache_working_set_log2 = 16,
-        .reserved = 0,
+        .memory_footprint_log2 = 8,
+        .io_intensity = 2,
+        .branch_predictability = 6,
+        .vectorization_benefit = 9,
+        .cache_miss_rate = 4,
     };
     
     const fp2 = TaskFingerprint{
@@ -362,11 +362,11 @@ test "enhanced fingerprint compatibility" {
         .seasonal_pattern = 3,
         .variance_level = 4,
         .expected_cycles_log2 = 12,
-        .memory_bandwidth_log2 = 8,
-        .branch_prediction_difficulty = 6,
-        .vectorization_efficiency = 9,
-        .cache_working_set_log2 = 16,
-        .reserved = 0,
+        .memory_footprint_log2 = 8,
+        .io_intensity = 2,
+        .branch_predictability = 6,
+        .vectorization_benefit = 9,
+        .cache_miss_rate = 4,
     };
     
     // Test single similarity (should work identically to original)
