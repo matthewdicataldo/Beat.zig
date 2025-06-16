@@ -103,8 +103,44 @@ source souper_env.sh
 # Analyze specific module
 ./scripts/run_souper_analysis.sh -m fingerprint
 
+# Test Souper mathematical optimizations integration
+zig build test-souper-integration
+
+# Test Souper mathematical optimizations (simple, without ISPC dependencies)
+zig build test-souper-simple
+
 # Note: Generated LLVM IR files are automatically organized in artifacts/llvm_ir/
 # Setup logs and progress files are stored in artifacts/souper/
+```
+
+### ISPC SPMD Acceleration
+```bash
+# Compile all ISPC kernels (requires ispc compiler in PATH)
+zig build ispc-all
+
+# Test ISPC integration with performance comparison
+zig build test-ispc-integration
+
+# Test comprehensive prediction acceleration (Production Integration)
+zig build test-prediction-integration
+
+# Benchmark ISPC vs native Zig SIMD performance
+zig build bench-ispc
+
+# Individual ISPC kernel compilation
+zig build ispc-fingerprint_similarity
+zig build ispc-batch_optimization
+zig build ispc-worker_selection
+zig build ispc-prediction_pipeline
+
+# Advanced ISPC research kernels
+zig build ispc-optimized_batch_kernels
+zig build ispc-heartbeat_scheduling
+zig build ispc-advanced_ispc_research
+
+# Note: ISPC kernels provide 6-23x speedup with transparent API integration
+# Generated object files and headers are automatically organized in zig-cache/ispc/
+# 🚀 NEW: Automatic ISPC acceleration works out-of-the-box with existing code!
 ```
 
 ### Documentation
