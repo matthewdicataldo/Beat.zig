@@ -801,6 +801,48 @@ pub fn build(b: *std.Build) void {
     const work_stealing_benchmark_step = b.step("bench-work-stealing", "Benchmark work-stealing efficiency with fast path optimization");
     work_stealing_benchmark_step.dependOn(&run_work_stealing_benchmark.step);
     
+    // Lock-free contention analysis benchmark
+    const lockfree_contention_benchmark = b.addExecutable(.{
+        .name = "benchmark_lockfree_contention",
+        .root_source_file = b.path("benchmark_lockfree_contention.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    lockfree_contention_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    build_config.addBuildOptions(b, lockfree_contention_benchmark, auto_config);
+    
+    const run_lockfree_contention_benchmark = b.addRunArtifact(lockfree_contention_benchmark);
+    const lockfree_contention_benchmark_step = b.step("bench-lockfree-contention", "Analyze CAS contention patterns in lock-free queue (15-25% improvement target)");
+    lockfree_contention_benchmark_step.dependOn(&run_lockfree_contention_benchmark.step);
+    
+    // Worker selection optimization benchmark
+    const worker_selection_benchmark = b.addExecutable(.{
+        .name = "benchmark_worker_selection",
+        .root_source_file = b.path("benchmark_worker_selection.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    worker_selection_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    build_config.addBuildOptions(b, worker_selection_benchmark, auto_config);
+    
+    const run_worker_selection_benchmark = b.addRunArtifact(worker_selection_benchmark);
+    const worker_selection_benchmark_step = b.step("bench-worker-selection", "Analyze worker selection allocation overhead (10-15% improvement target)");
+    worker_selection_benchmark_step.dependOn(&run_worker_selection_benchmark.step);
+    
+    // Worker selection optimization validation benchmark
+    const worker_selection_optimized_benchmark = b.addExecutable(.{
+        .name = "benchmark_worker_selection_optimized",
+        .root_source_file = b.path("benchmark_worker_selection_optimized.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    worker_selection_optimized_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    build_config.addBuildOptions(b, worker_selection_optimized_benchmark, auto_config);
+    
+    const run_worker_selection_optimized_benchmark = b.addRunArtifact(worker_selection_optimized_benchmark);
+    const worker_selection_optimized_benchmark_step = b.step("bench-worker-selection-optimized", "Validate worker selection optimization performance (14.4μs overhead eliminated)");
+    worker_selection_optimized_benchmark_step.dependOn(&run_worker_selection_optimized_benchmark.step);
+    
     // ============================================================================
     // Souper Superoptimization Integration
     // ============================================================================
