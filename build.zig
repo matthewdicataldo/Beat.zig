@@ -529,6 +529,83 @@ pub fn build(b: *std.Build) void {
     const simd_benchmark_test_step = b.step("test-simd-benchmark", "Test comprehensive SIMD benchmarking and validation framework");
     simd_benchmark_test_step.dependOn(&run_simd_benchmark_test.step);
     
+    // Continuation stealing test (Task 7.1)
+    const continuation_stealing_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_stealing.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    continuation_stealing_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, continuation_stealing_test, auto_config);
+    
+    const run_continuation_stealing_test = b.addRunArtifact(continuation_stealing_test);
+    const continuation_stealing_test_step = b.step("test-continuation-stealing", "Test continuation stealing implementation");
+    continuation_stealing_test_step.dependOn(&run_continuation_stealing_test.step);
+    
+    // ThreadPool continuation integration test (Task 7.1)
+    const threadpool_continuation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_threadpool_continuation_integration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    threadpool_continuation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, threadpool_continuation_test, auto_config);
+    
+    const run_threadpool_continuation_test = b.addRunArtifact(threadpool_continuation_test);
+    const threadpool_continuation_test_step = b.step("test-threadpool-continuation", "Test ThreadPool integration with continuation stealing");
+    threadpool_continuation_test_step.dependOn(&run_threadpool_continuation_test.step);
+    
+    // NUMA-aware continuation stealing test (Task 7.2)
+    const numa_continuation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_numa_continuation_stealing.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    numa_continuation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, numa_continuation_test, auto_config);
+    
+    const run_numa_continuation_test = b.addRunArtifact(numa_continuation_test);
+    const numa_continuation_test_step = b.step("test-numa-continuation-stealing", "Test NUMA-aware continuation stealing with locality tracking");
+    numa_continuation_test_step.dependOn(&run_numa_continuation_test.step);
+    
+    // SIMD-enhanced continuation integration test (Phase 1 integration)
+    const simd_continuation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_simd_integration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    simd_continuation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, simd_continuation_test, auto_config);
+    
+    const run_simd_continuation_test = b.addRunArtifact(simd_continuation_test);
+    const simd_continuation_test_step = b.step("test-simd-continuation", "Test SIMD-enhanced continuation processing with 6-23x performance improvement");
+    simd_continuation_test_step.dependOn(&run_simd_continuation_test.step);
+    
+    // Predictive accounting integration test (Phase 1 integration)
+    const predictive_continuation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_predictive_simple.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    predictive_continuation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, predictive_continuation_test, auto_config);
+    
+    const run_predictive_continuation_test = b.addRunArtifact(predictive_continuation_test);
+    const predictive_continuation_test_step = b.step("test-predictive-continuation", "Test predictive accounting integration with One Euro Filter and adaptive NUMA placement");
+    predictive_continuation_test_step.dependOn(&run_predictive_continuation_test.step);
+    
+    // Advanced worker selection integration test (Phase 1 integration)
+    const worker_selection_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_worker_selection.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    worker_selection_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, worker_selection_test, auto_config);
+    
+    const run_worker_selection_test = b.addRunArtifact(worker_selection_test);
+    const worker_selection_test_step = b.step("test-worker-selection", "Test advanced worker selection integration with multi-criteria optimization");
+    worker_selection_test_step.dependOn(&run_worker_selection_test.step);
     
     // ML-based classification integration test (Task 3.2.2)
     const ml_integration_test = b.addTest(.{
@@ -704,6 +781,39 @@ pub fn build(b: *std.Build) void {
     const run_work_stealing_benchmark = b.addRunArtifact(work_stealing_benchmark);
     const work_stealing_benchmark_step = b.step("bench-work-stealing", "Benchmark work-stealing efficiency with fast path optimization");
     work_stealing_benchmark_step.dependOn(&run_work_stealing_benchmark.step);
+    
+    // Continuation stealing comprehensive benchmark (Task 7.3)
+    const continuation_stealing_benchmark = b.addExecutable(.{
+        .name = "benchmark_continuation_stealing",
+        .root_source_file = b.path("benchmarks/benchmark_continuation_stealing.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    continuation_stealing_benchmark.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, continuation_stealing_benchmark, auto_config);
+    
+    const run_continuation_stealing_benchmark = b.addRunArtifact(continuation_stealing_benchmark);
+    const continuation_stealing_benchmark_step = b.step("bench-continuation-stealing", "Comprehensive benchmark: Work stealing vs NUMA-aware continuation stealing");
+    continuation_stealing_benchmark_step.dependOn(&run_continuation_stealing_benchmark.step);
+    
+    // COZ profiling benchmark for continuation stealing (Task 7.4)
+    const continuation_stealing_coz_benchmark = b.addExecutable(.{
+        .name = "benchmark_continuation_stealing_coz",
+        .root_source_file = b.path("benchmarks/benchmark_continuation_stealing_coz.zig"),
+        .target = target,
+        .optimize = if (enable_coz) .ReleaseSafe else .ReleaseFast,
+    });
+    
+    if (enable_coz) {
+        continuation_stealing_coz_benchmark.root_module.omit_frame_pointer = false;
+    }
+    
+    continuation_stealing_coz_benchmark.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, continuation_stealing_coz_benchmark, auto_config);
+    
+    const run_continuation_stealing_coz_benchmark = b.addRunArtifact(continuation_stealing_coz_benchmark);
+    const continuation_stealing_coz_benchmark_step = b.step("bench-continuation-stealing-coz", "COZ profiling benchmark for continuation stealing bottleneck analysis");
+    continuation_stealing_coz_benchmark_step.dependOn(&run_continuation_stealing_coz_benchmark.step);
     
     // ============================================================================
     // Souper Superoptimization Integration
