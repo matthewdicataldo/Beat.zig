@@ -1,0 +1,17 @@
+- off the beaten path
+- intro to parallelism / fork/join / hearbeat scheduling
+- one euro filter
+- simd w/ zig + ispc
+- zig + souper + minotaur
+- NUMA & topology awareness
+- data oriented design
+- Work-stealing thread pool implementation
+- [x] Heartbeat scheduling with token accounting  
+- [x] CPU topology awareness and NUMA optimization
+- [x] One Euro Filter for task execution prediction
+- [x] Compile-time work distribution patterns
+- [x] Build-time auto-configuration integration
+- [x] Runtime parallel work distribution
+- [x] Improved thread affinity handling
+- [x] Enhanced error message system
+- fingerprint

@@ -109,6 +109,30 @@ pub const WorkItem = union(enum) {
             .continuation => |cont| cont.markStolen(new_worker_id),
         }
     }
+    
+    /// Mark work item as stolen with NUMA awareness
+    pub fn markStolenWithNuma(self: Self, new_worker_id: u32, new_numa_node: ?u32, new_socket: ?u32) void {
+        switch (self) {
+            .task => {}, // Tasks don't use NUMA tracking
+            .continuation => |cont| cont.markStolenWithNuma(new_worker_id, new_numa_node, new_socket),
+        }
+    }
+    
+    /// Get NUMA stealing preference for this work item
+    pub fn getNumaStealingPreference(self: Self, target_numa_node: ?u32, target_socket: ?u32) f32 {
+        return switch (self) {
+            .task => 0.5, // Tasks have neutral NUMA preference
+            .continuation => |cont| cont.getStealingPreference(target_numa_node, target_socket),
+        };
+    }
+    
+    /// Check if work item prefers local execution
+    pub fn prefersLocalExecution(self: Self) bool {
+        return switch (self) {
+            .task => false, // Tasks don't have locality preference
+            .continuation => |cont| cont.prefersLocalExecution(),
+        };
+    }
 };
 
 // ============================================================================

@@ -32,7 +32,7 @@ pub const Continuation = struct {
     steal_count: u32,                         // 4 bytes - number of times stolen
     creation_timestamp: u64,                   // 8 bytes - creation time (nanoseconds)
     
-    // COLD PATH: Rarely accessed metadata (remaining bytes, total: 96 bytes = 1.5 cache lines)
+    // COLD PATH: Rarely accessed metadata (remaining bytes, total: 112 bytes = 1.75 cache lines)
     stack_base: ?usize,                       // 8 bytes - stack base for bounds checking
     stack_limit: ?usize,                      // 8 bytes - stack limit for overflow detection
     error_info: ?*anyopaque,                  // 8 bytes - error context if failed
@@ -40,6 +40,12 @@ pub const Continuation = struct {
     affinity_hint: ?u32,                      // 4 bytes - worker affinity hint
     fingerprint_hash: ?u64,                   // 8 bytes - continuation fingerprint
     execution_time_ns: ?u64,                  // 8 bytes - actual execution time
+    
+    // NUMA locality tracking (16 bytes)
+    original_numa_node: ?u32,                 // 4 bytes - NUMA node where created
+    current_socket: ?u32,                     // 4 bytes - current socket ID
+    migration_count: u32,                     // 4 bytes - number of NUMA migrations
+    locality_score: f32,                      // 4 bytes - locality preference score (0.0-1.0)
     
     // Memory management
     allocator: ?std.mem.Allocator,            // 8 bytes - allocator for cleanup
@@ -71,6 +77,10 @@ pub const Continuation = struct {
             .affinity_hint = null,
             .fingerprint_hash = null,
             .execution_time_ns = null,
+            .original_numa_node = null,
+            .current_socket = null,
+            .migration_count = 0,
+            .locality_score = 1.0, // Start with perfect locality
             .allocator = allocator,
         };
     }
@@ -105,6 +115,20 @@ pub const Continuation = struct {
         self.state = .stolen;
         self.worker_id = new_worker_id;
         self.steal_count += 1;
+    }
+    
+    /// Mark continuation as stolen with NUMA locality tracking
+    pub fn markStolenWithNuma(self: *Self, new_worker_id: u32, new_numa_node: ?u32, new_socket: ?u32) void {
+        self.markStolen(new_worker_id);
+        
+        // Track NUMA migration
+        if (self.numa_node != null and new_numa_node != null and self.numa_node.? != new_numa_node.?) {
+            self.migration_count += 1;
+            self.updateLocalityScore(new_numa_node, new_socket);
+        }
+        
+        self.numa_node = new_numa_node;
+        self.current_socket = new_socket;
     }
     
     /// Mark continuation as running on a worker
@@ -159,6 +183,64 @@ pub const Continuation = struct {
         const limit = self.stack_limit.?;
         
         return self.frame_ptr >= limit and self.frame_ptr <= base;
+    }
+    
+    /// Initialize NUMA locality tracking
+    pub fn initNumaLocality(self: *Self, numa_node: ?u32, socket: ?u32) void {
+        self.numa_node = numa_node;
+        self.original_numa_node = numa_node;
+        self.current_socket = socket;
+        self.migration_count = 0;
+        self.locality_score = 1.0;
+    }
+    
+    /// Update locality score based on NUMA migration
+    pub fn updateLocalityScore(self: *Self, new_numa_node: ?u32, new_socket: ?u32) void {
+        // Calculate locality penalty based on migration distance
+        var penalty: f32 = 0.0;
+        
+        if (self.original_numa_node != null and new_numa_node != null) {
+            if (self.original_numa_node.? != new_numa_node.?) {
+                // NUMA node migration - significant penalty
+                penalty += 0.3;
+                
+                // Additional penalty if crossing socket boundaries
+                if (self.current_socket != null and new_socket != null and self.current_socket.? != new_socket.?) {
+                    penalty += 0.2;
+                }
+            }
+        }
+        
+        // Apply penalty with exponential decay
+        self.locality_score = @max(0.1, self.locality_score - penalty);
+    }
+    
+    /// Get stealing preference based on NUMA locality
+    pub fn getStealingPreference(self: *const Self, target_numa_node: ?u32, target_socket: ?u32) f32 {
+        if (self.numa_node == null or target_numa_node == null) return 0.5; // Neutral
+        
+        var preference: f32 = 1.0;
+        
+        // Same NUMA node = highest preference
+        if (self.numa_node.? == target_numa_node.?) {
+            preference = 1.0;
+        }
+        // Same socket, different NUMA = medium preference
+        else if (self.current_socket != null and target_socket != null and self.current_socket.? == target_socket.?) {
+            preference = 0.7;
+        }
+        // Different socket = low preference
+        else {
+            preference = 0.3;
+        }
+        
+        // Apply locality score modifier
+        return preference * self.locality_score;
+    }
+    
+    /// Check if continuation should prefer local execution
+    pub fn prefersLocalExecution(self: *const Self) bool {
+        return self.locality_score > 0.8 and self.migration_count <= 2;
     }
 };
 
