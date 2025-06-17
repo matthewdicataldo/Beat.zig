@@ -316,7 +316,7 @@ pub const ContinuationBatch = struct {
     }
     
     /// Get batch statistics
-    pub fn getBatchStats(self: *Self) ContinuationBatchStats {
+    pub fn getBatchStats(self: *const Self) ContinuationBatchStats {
         return ContinuationBatchStats{
             .batch_size = self.continuations.items.len,
             .estimated_speedup = self.estimated_speedup,

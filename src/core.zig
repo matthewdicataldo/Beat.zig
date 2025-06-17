@@ -32,6 +32,7 @@ pub const continuation = @import("continuation.zig");
 pub const continuation_simd = @import("continuation_simd.zig");
 pub const continuation_predictive = @import("continuation_predictive.zig");
 pub const continuation_worker_selection = @import("continuation_worker_selection.zig");
+pub const continuation_unified = @import("continuation_unified.zig");
 
 // Version info
 pub const version = std.SemanticVersion{
@@ -374,9 +375,12 @@ pub const ThreadPool = struct {
     // Advanced worker selection for continuations (Phase 1 integration)
     continuation_worker_selector: ?*continuation_worker_selection.ContinuationWorkerSelector = null,
     
+    // Unified continuation management system (Consolidation)
+    unified_continuation_manager: ?*continuation_unified.UnifiedContinuationManager = null,
+    
     const Self = @This();
     
-    const Worker = struct {
+    pub const Worker = struct {
         id: u32,
         thread: std.Thread,
         pool: *ThreadPool,
@@ -622,6 +626,20 @@ pub const ThreadPool = struct {
             std.log.info("🎯 Advanced continuation worker selection enabled - multi-criteria optimization", .{});
         }
         
+        // Initialize unified continuation management system (Consolidation)
+        // Provides single optimized system replacing separate SIMD, predictive, and worker selection components
+        if (self.fingerprint_registry) |registry| {
+            const unified_config = continuation_unified.UnifiedConfig.performanceOptimized();
+            
+            self.unified_continuation_manager = try allocator.create(continuation_unified.UnifiedContinuationManager);
+            self.unified_continuation_manager.?.* = try continuation_unified.UnifiedContinuationManager.init(
+                allocator,
+                registry,
+                unified_config
+            );
+            std.log.info("🚀 Unified continuation management enabled - consolidated high-performance system", .{});
+        }
+        
         // Initialize workers
         for (self.workers, 0..) |*worker, i| {
             const cpu_id = if (self.topology) |topo| @as(u32, @intCast(i % topo.total_cores)) else null;
@@ -722,6 +740,11 @@ pub const ThreadPool = struct {
             self.allocator.destroy(selector);
         }
         
+        if (self.unified_continuation_manager) |manager| {
+            manager.deinit();
+            self.allocator.destroy(manager);
+        }
+        
         self.allocator.free(self.workers);
         self.allocator.destroy(self);
     }
@@ -781,6 +804,66 @@ pub const ThreadPool = struct {
         // Update statistics
         _ = self.stats.hot.tasks_submitted.fetchAdd(1, .monotonic);
         
+        // Use unified continuation management system for optimal performance
+        if (self.unified_continuation_manager) |unified_manager| {
+            // Get comprehensive analysis from unified system (SIMD, prediction, worker selection)
+            const analysis = try unified_manager.getAnalysis(cont);
+            
+            // Apply unified analysis results to continuation
+            cont.fingerprint_hash = @intFromFloat(analysis.simd_classification.suitability_score * 1000000);
+            
+            // Apply NUMA preferences from unified analysis
+            if (analysis.numa_coordination.final_numa_node) |numa_node| {
+                cont.numa_node = numa_node;
+            }
+            
+            // Adjust scheduling based on unified prediction
+            if (analysis.execution_prediction.confidence > 0.7 and analysis.execution_prediction.predicted_time_ns > 5_000_000) {
+                cont.locality_score = @min(1.0, cont.locality_score + analysis.execution_prediction.confidence * 0.2);
+            }
+            
+            // Use unified worker selection
+            const worker_preferences = analysis.worker_preferences;
+            var worker_id: u32 = 0;
+            var best_score: f32 = -1.0;
+            
+            for (self.workers, 0..) |worker, i| {
+                var score: f32 = 0.5; // Base score
+                
+                // NUMA locality bonus from unified analysis
+                if (analysis.numa_coordination.final_numa_node) |numa_node| {
+                    if (worker.numa_node == numa_node) {
+                        score += 0.3;
+                    }
+                }
+                
+                // Apply unified worker preference weights
+                score += worker_preferences.locality_bonus_factor;
+                
+                if (score > best_score) {
+                    best_score = score;
+                    worker_id = @intCast(i);
+                }
+            }
+            
+            const worker = &self.workers[worker_id];
+            
+            // Register with worker's local continuation registry
+            if (worker.continuation_registry) |registry| {
+                try registry.registerContinuation(cont);
+            }
+            
+            // Submit as WorkItem
+            const work_item = lockfree.WorkItem.fromContinuation(cont);
+            switch (worker.queue) {
+                .mutex => |*q| try q.pushContinuation(cont),
+                .lockfree => |*q| try q.pushBottom(work_item),
+            }
+            
+            return;
+        }
+        
+        // Fallback to legacy separate systems if unified system not available
         // SIMD-enhanced continuation classification (6-23x performance improvement)
         var simd_class: ?continuation_simd.ContinuationSIMDClass = null;
         if (self.continuation_simd_classifier) |classifier| {
@@ -862,6 +945,16 @@ pub const ThreadPool = struct {
     
     /// Handle continuation completion and update predictive accounting
     pub fn handleContinuationCompletion(self: *Self, cont: *continuation.Continuation, actual_execution_time_ns: u64) void {
+        // Use unified system for completion handling if available
+        if (self.unified_continuation_manager) |unified_manager| {
+            unified_manager.updateWithResults(cont, actual_execution_time_ns, 0) catch |err| {
+                // Log error but don't fail the continuation completion
+                std.log.warn("Failed to update unified continuation analysis: {}", .{err});
+            };
+            return;
+        }
+        
+        // Fallback to legacy predictive accounting
         if (self.continuation_predictive_accounting) |predictor| {
             predictor.updatePrediction(cont, actual_execution_time_ns) catch |err| {
                 // Log error but don't fail the continuation completion
