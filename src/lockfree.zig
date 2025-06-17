@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
+const prefetch = @import("prefetch.zig");
 
 // Lock-free data structures for ZigPulse
 
@@ -24,20 +25,30 @@ pub fn WorkStealingDeque(comptime T: type) type {
         const Self = @This();
         const AtomicU64 = std.atomic.Value(u64);
         
-        // Core deque state
+        // HOT PATH: Critical atomic indices (separate cache lines to avoid false sharing)
+        hot_data: struct {
+            top: AtomicU64,    // Thieves steal from top
+            _pad1: [64 - @sizeOf(AtomicU64)]u8 = [_]u8{0} ** (64 - @sizeOf(AtomicU64)),
+            bottom: AtomicU64, // Owner works from bottom  
+            _pad2: [64 - @sizeOf(AtomicU64)]u8 = [_]u8{0} ** (64 - @sizeOf(AtomicU64)),
+        } align(64) = .{
+            .top = AtomicU64.init(0),
+            .bottom = AtomicU64.init(0),
+        },
+        
+        // WARM PATH: Core deque state (accessed during resize/init)
         buffer: []?T,
         capacity: u64,
         mask: u64,
         allocator: std.mem.Allocator,
         
-        // Atomic indices
-        top: AtomicU64,    // Thieves steal from top
-        bottom: AtomicU64, // Owner works from bottom
-        
-        // Statistics
-        push_count: AtomicU64 = AtomicU64.init(0),
-        pop_count: AtomicU64 = AtomicU64.init(0),
-        steal_count: AtomicU64 = AtomicU64.init(0),
+        // COLD PATH: Statistics (separate cache line)
+        stats: struct {
+            push_count: AtomicU64 = AtomicU64.init(0),
+            pop_count: AtomicU64 = AtomicU64.init(0),
+            steal_count: AtomicU64 = AtomicU64.init(0),
+            _pad: [64 - 3 * @sizeOf(AtomicU64)]u8 = [_]u8{0} ** (64 - 3 * @sizeOf(AtomicU64)),
+        } align(64) = .{},
         
         pub fn init(allocator: std.mem.Allocator, capacity: u64) !Self {
             // Ensure capacity is power of 2
@@ -57,8 +68,7 @@ pub fn WorkStealingDeque(comptime T: type) type {
                 .capacity = actual_capacity,
                 .mask = actual_capacity - 1,
                 .allocator = allocator,
-                .top = AtomicU64.init(0),
-                .bottom = AtomicU64.init(0),
+                // hot_data and stats are initialized with defaults
             };
         }
         
@@ -69,8 +79,8 @@ pub fn WorkStealingDeque(comptime T: type) type {
         // Owner operations (single producer)
         
         pub fn pushBottom(self: *Self, item: T) !void {
-            const b = self.bottom.load(.monotonic);
-            const t = self.top.load(.acquire);
+            const b = self.hot_data.bottom.load(.monotonic);
+            const t = self.hot_data.top.load(.acquire);
             
             // Check if full (handle wraparound)
             const current_size = if (b >= t) b - t else 0;
@@ -82,27 +92,42 @@ pub fn WorkStealingDeque(comptime T: type) type {
                 return error.WorkStealingDequeFull;
             }
             
+            // Prefetch the buffer location we're about to write to
+            // This brings the cache line into cache before the write
+            const buffer_index = b & self.mask;
+            prefetch.prefetch(&self.buffer[buffer_index], .write, .temporal_high);
+            
+            // Prefetch the next few buffer locations for sequential operations
+            if (buffer_index + 1 < self.buffer.len) {
+                prefetch.prefetch(&self.buffer[buffer_index + 1], .write, .temporal_medium);
+            }
+            
             // Store item
-            self.buffer[b & self.mask] = item;
+            self.buffer[buffer_index] = item;
             
             // Increment bottom with release ordering to ensure task is visible
-            self.bottom.store(b + 1, .release);
+            self.hot_data.bottom.store(b + 1, .release);
             
-            _ = self.push_count.fetchAdd(1, .monotonic);
+            _ = self.stats.push_count.fetchAdd(1, .monotonic);
         }
         
         pub fn popBottom(self: *Self) ?T {
-            const b = self.bottom.load(.monotonic);
+            const b = self.hot_data.bottom.load(.monotonic);
             if (b == 0) return null;
             
             const new_b = b - 1;
-            self.bottom.store(new_b, .seq_cst);
             
-            const t = self.top.load(.monotonic);
+            // Prefetch the item we're about to read
+            const buffer_index = new_b & self.mask;
+            prefetch.prefetch(&self.buffer[buffer_index], .read, .temporal_high);
+            
+            self.hot_data.bottom.store(new_b, .seq_cst);
+            
+            const t = self.hot_data.top.load(.monotonic);
             
             if (@as(i64, @intCast(new_b)) < @as(i64, @intCast(t))) {
                 // Empty
-                self.bottom.store(t, .monotonic);
+                self.hot_data.bottom.store(t, .monotonic);
                 return null;
             }
             
@@ -110,19 +135,19 @@ pub fn WorkStealingDeque(comptime T: type) type {
             
             if (new_b == t) {
                 // Last element - race with thieves
-                if (self.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic) == null) {
+                if (self.hot_data.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic) == null) {
                     // Won the race
-                    self.bottom.store(t + 1, .monotonic);
-                    _ = self.pop_count.fetchAdd(1, .monotonic);
+                    self.hot_data.bottom.store(t + 1, .monotonic);
+                    _ = self.stats.pop_count.fetchAdd(1, .monotonic);
                     return item;
                 } else {
                     // Lost the race
-                    self.bottom.store(t + 1, .monotonic);
+                    self.hot_data.bottom.store(t + 1, .monotonic);
                     return null;
                 }
             } else {
                 // No race
-                _ = self.pop_count.fetchAdd(1, .monotonic);
+                _ = self.stats.pop_count.fetchAdd(1, .monotonic);
                 return item;
             }
         }
@@ -130,20 +155,29 @@ pub fn WorkStealingDeque(comptime T: type) type {
         // Thief operations (multiple consumers)
         
         pub fn steal(self: *Self) ?T {
-            const t = self.top.load(.acquire);
-            const b = self.bottom.load(.seq_cst);
+            const t = self.hot_data.top.load(.acquire);
+            const b = self.hot_data.bottom.load(.seq_cst);
             
             if (@as(i64, @intCast(t)) >= @as(i64, @intCast(b))) {
                 // Empty
                 return null;
             }
             
-            const item = self.buffer[t & self.mask];
+            // Prefetch the item we're about to steal
+            const buffer_index = t & self.mask;
+            prefetch.prefetch(&self.buffer[buffer_index], .read, .temporal_high);
+            
+            // Also prefetch the next item in case multiple steals happen
+            if (buffer_index + 1 < self.buffer.len and (t + 1) < b) {
+                prefetch.prefetch(&self.buffer[(t + 1) & self.mask], .read, .temporal_medium);
+            }
+            
+            const item = self.buffer[buffer_index];
             
             // Try to increment top
-            if (self.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic) == null) {
+            if (self.hot_data.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic) == null) {
                 // Success
-                _ = self.steal_count.fetchAdd(1, .monotonic);
+                _ = self.stats.steal_count.fetchAdd(1, .monotonic);
                 return item;
             }
             
@@ -152,8 +186,8 @@ pub fn WorkStealingDeque(comptime T: type) type {
         }
         
         pub fn size(self: *const Self) u64 {
-            const b = self.bottom.load(.monotonic);
-            const t = self.top.load(.monotonic);
+            const b = self.hot_data.bottom.load(.monotonic);
+            const t = self.hot_data.top.load(.monotonic);
             return if (b >= t) b - t else 0;
         }
         
@@ -163,9 +197,9 @@ pub fn WorkStealingDeque(comptime T: type) type {
         
         pub fn getStats(self: *const Self) DequeStats {
             return .{
-                .pushes = self.push_count.load(.monotonic),
-                .pops = self.pop_count.load(.monotonic),
-                .steals = self.steal_count.load(.monotonic),
+                .pushes = self.stats.push_count.load(.monotonic),
+                .pops = self.stats.pop_count.load(.monotonic),
+                .steals = self.stats.steal_count.load(.monotonic),
                 .current_size = self.size(),
             };
         }

@@ -29,6 +29,11 @@ pub fn build(b: *std.Build) void {
     
     b.installArtifact(lib);
     
+    // Define the module for reuse across all targets
+    const zigpulse_module = b.addModule("zigpulse", .{
+        .root_source_file = b.path("src/core.zig"),
+    });
+    
     // Tests with auto-configuration
     const tests = b.addTest(.{
         .root_source_file = b.path("src/core.zig"),
@@ -59,6 +64,7 @@ pub fn build(b: *std.Build) void {
     bench_config.is_release_fast = true;
     bench_config.optimal_queue_size = auto_config.optimal_workers * 256; // Larger queues for benchmarks
     build_config.addBuildOptions(b, benchmark_exe, bench_config);
+    benchmark_exe.root_module.addImport("zigpulse", zigpulse_module);
     
     b.installArtifact(benchmark_exe);
     
@@ -91,9 +97,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("beat.zig"),  // Use the bundle file
     });
     
-    const zigpulse_module = b.addModule("zigpulse", .{
-        .root_source_file = b.path("src/core.zig"),
-    });
     modular_example.root_module.addImport("zigpulse", zigpulse_module);
     
     const run_modular = b.addRunArtifact(modular_example);
@@ -111,6 +114,115 @@ pub fn build(b: *std.Build) void {
     const run_bundle = b.addRunArtifact(bundle_example);
     const bundle_step = b.step("example-bundle", "Run bundle usage example");
     bundle_step.dependOn(&run_bundle.step);
+    
+    // A3C Reinforcement Learning Demo
+    const a3c_demo = b.addExecutable(.{
+        .name = "a3c_demo",
+        .root_source_file = b.path("examples/a3c_demo.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    build_config.addBuildOptions(b, a3c_demo, auto_config);
+    a3c_demo.root_module.addImport("zigpulse", zigpulse_module);
+    
+    const run_a3c_demo = b.addRunArtifact(a3c_demo);
+    const a3c_demo_step = b.step("demo-a3c", "Run A3C Reinforcement Learning demo");
+    a3c_demo_step.dependOn(&run_a3c_demo.step);
+    
+    // Intensive profiling benchmark
+    const profile_benchmark = b.addExecutable(.{
+        .name = "profile_intensive_benchmark",
+        .root_source_file = b.path("profile_intensive_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Fast for realistic profiling
+    });
+    build_config.addBuildOptions(b, profile_benchmark, auto_config);
+    profile_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    
+    const run_profile_benchmark = b.addRunArtifact(profile_benchmark);
+    const profile_benchmark_step = b.step("profile-intensive", "Run intensive benchmark for profiling");
+    profile_benchmark_step.dependOn(&run_profile_benchmark.step);
+    
+    // Simple COZ benchmark
+    const coz_simple = b.addExecutable(.{
+        .name = "coz_benchmark_simple",
+        .root_source_file = b.path("coz_benchmark_simple.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe, // Better for COZ profiling
+    });
+    build_config.addBuildOptions(b, coz_simple, auto_config);
+    coz_simple.root_module.addImport("zigpulse", zigpulse_module);
+    
+    // Enable frame pointers for better COZ profiling
+    if (enable_coz) {
+        coz_simple.root_module.omit_frame_pointer = false;
+    }
+    
+    const run_coz_simple = b.addRunArtifact(coz_simple);
+    const coz_simple_step = b.step("coz-simple", "Run simple COZ profiling benchmark");
+    coz_simple_step.dependOn(&run_coz_simple.step);
+    
+    // Intensive COZ benchmark
+    const coz_intensive = b.addExecutable(.{
+        .name = "coz_intensive",
+        .root_source_file = b.path("coz_intensive.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe,
+    });
+    build_config.addBuildOptions(b, coz_intensive, auto_config);
+    coz_intensive.root_module.addImport("zigpulse", zigpulse_module);
+    
+    // COZ frame pointer support
+    if (enable_coz) {
+        coz_intensive.root_module.omit_frame_pointer = false;
+    }
+    
+    const run_coz_intensive = b.addRunArtifact(coz_intensive);
+    const coz_intensive_step = b.step("coz-intensive", "Run intensive COZ profiling benchmark");
+    coz_intensive_step.dependOn(&run_coz_intensive.step);
+    
+    // Cache-line alignment benchmark
+    const cache_alignment_benchmark = b.addExecutable(.{
+        .name = "benchmark_cache_alignment",
+        .root_source_file = b.path("benchmark_cache_alignment.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Use ReleaseFast for accurate performance measurement
+    });
+    build_config.addBuildOptions(b, cache_alignment_benchmark, auto_config);
+    cache_alignment_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    
+    const run_cache_alignment_benchmark = b.addRunArtifact(cache_alignment_benchmark);
+    const cache_alignment_step = b.step("bench-cache-alignment", "Benchmark cache-line alignment optimizations");
+    cache_alignment_step.dependOn(&run_cache_alignment_benchmark.step);
+    
+    // Memory prefetching benchmark
+    const prefetching_benchmark = b.addExecutable(.{
+        .name = "benchmark_prefetching",
+        .root_source_file = b.path("benchmark_prefetching.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Use ReleaseFast for accurate memory performance measurement
+    });
+    build_config.addBuildOptions(b, prefetching_benchmark, auto_config);
+    prefetching_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    
+    const run_prefetching_benchmark = b.addRunArtifact(prefetching_benchmark);
+    const prefetching_step = b.step("bench-prefetching", "Benchmark memory prefetching optimizations");
+    prefetching_step.dependOn(&run_prefetching_benchmark.step);
+    
+    // Batch formation optimization benchmark
+    const batch_formation_benchmark = b.addExecutable(.{
+        .name = "benchmark_batch_formation",
+        .root_source_file = b.path("benchmark_batch_formation.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Use ReleaseFast for accurate batch formation timing
+    });
+    build_config.addBuildOptions(b, batch_formation_benchmark, auto_config);
+    batch_formation_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    
+    const run_batch_formation_benchmark = b.addRunArtifact(batch_formation_benchmark);
+    const batch_formation_step = b.step("bench-batch-formation", "Benchmark batch formation optimizations");
+    batch_formation_step.dependOn(&run_batch_formation_benchmark.step);
     
     // Bundle file tests
     const bundle_test = b.addTest(.{
@@ -688,6 +800,48 @@ pub fn build(b: *std.Build) void {
     const run_work_stealing_benchmark = b.addRunArtifact(work_stealing_benchmark);
     const work_stealing_benchmark_step = b.step("bench-work-stealing", "Benchmark work-stealing efficiency with fast path optimization");
     work_stealing_benchmark_step.dependOn(&run_work_stealing_benchmark.step);
+    
+    // Lock-free contention analysis benchmark
+    const lockfree_contention_benchmark = b.addExecutable(.{
+        .name = "benchmark_lockfree_contention",
+        .root_source_file = b.path("benchmark_lockfree_contention.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    lockfree_contention_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    build_config.addBuildOptions(b, lockfree_contention_benchmark, auto_config);
+    
+    const run_lockfree_contention_benchmark = b.addRunArtifact(lockfree_contention_benchmark);
+    const lockfree_contention_benchmark_step = b.step("bench-lockfree-contention", "Analyze CAS contention patterns in lock-free queue (15-25% improvement target)");
+    lockfree_contention_benchmark_step.dependOn(&run_lockfree_contention_benchmark.step);
+    
+    // Worker selection optimization benchmark
+    const worker_selection_benchmark = b.addExecutable(.{
+        .name = "benchmark_worker_selection",
+        .root_source_file = b.path("benchmark_worker_selection.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    worker_selection_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    build_config.addBuildOptions(b, worker_selection_benchmark, auto_config);
+    
+    const run_worker_selection_benchmark = b.addRunArtifact(worker_selection_benchmark);
+    const worker_selection_benchmark_step = b.step("bench-worker-selection", "Analyze worker selection allocation overhead (10-15% improvement target)");
+    worker_selection_benchmark_step.dependOn(&run_worker_selection_benchmark.step);
+    
+    // Worker selection optimization validation benchmark
+    const worker_selection_optimized_benchmark = b.addExecutable(.{
+        .name = "benchmark_worker_selection_optimized",
+        .root_source_file = b.path("benchmark_worker_selection_optimized.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    worker_selection_optimized_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    build_config.addBuildOptions(b, worker_selection_optimized_benchmark, auto_config);
+    
+    const run_worker_selection_optimized_benchmark = b.addRunArtifact(worker_selection_optimized_benchmark);
+    const worker_selection_optimized_benchmark_step = b.step("bench-worker-selection-optimized", "Validate worker selection optimization performance (14.4μs overhead eliminated)");
+    worker_selection_optimized_benchmark_step.dependOn(&run_worker_selection_optimized_benchmark.step);
     
     // ============================================================================
     // Souper Superoptimization Integration
