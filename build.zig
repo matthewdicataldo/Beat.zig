@@ -29,6 +29,11 @@ pub fn build(b: *std.Build) void {
     
     b.installArtifact(lib);
     
+    // Define the module for reuse across all targets
+    const zigpulse_module = b.addModule("zigpulse", .{
+        .root_source_file = b.path("src/core.zig"),
+    });
+    
     // Tests with auto-configuration
     const tests = b.addTest(.{
         .root_source_file = b.path("src/core.zig"),
@@ -59,6 +64,7 @@ pub fn build(b: *std.Build) void {
     bench_config.is_release_fast = true;
     bench_config.optimal_queue_size = auto_config.optimal_workers * 256; // Larger queues for benchmarks
     build_config.addBuildOptions(b, benchmark_exe, bench_config);
+    benchmark_exe.root_module.addImport("zigpulse", zigpulse_module);
     
     b.installArtifact(benchmark_exe);
     
@@ -91,9 +97,6 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("beat.zig"),  // Use the bundle file
     });
     
-    const zigpulse_module = b.addModule("zigpulse", .{
-        .root_source_file = b.path("src/core.zig"),
-    });
     modular_example.root_module.addImport("zigpulse", zigpulse_module);
     
     const run_modular = b.addRunArtifact(modular_example);
@@ -126,6 +129,58 @@ pub fn build(b: *std.Build) void {
     const run_a3c_demo = b.addRunArtifact(a3c_demo);
     const a3c_demo_step = b.step("demo-a3c", "Run A3C Reinforcement Learning demo");
     a3c_demo_step.dependOn(&run_a3c_demo.step);
+    
+    // Intensive profiling benchmark
+    const profile_benchmark = b.addExecutable(.{
+        .name = "profile_intensive_benchmark",
+        .root_source_file = b.path("profile_intensive_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Fast for realistic profiling
+    });
+    build_config.addBuildOptions(b, profile_benchmark, auto_config);
+    profile_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    
+    const run_profile_benchmark = b.addRunArtifact(profile_benchmark);
+    const profile_benchmark_step = b.step("profile-intensive", "Run intensive benchmark for profiling");
+    profile_benchmark_step.dependOn(&run_profile_benchmark.step);
+    
+    // Simple COZ benchmark
+    const coz_simple = b.addExecutable(.{
+        .name = "coz_benchmark_simple",
+        .root_source_file = b.path("coz_benchmark_simple.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe, // Better for COZ profiling
+    });
+    build_config.addBuildOptions(b, coz_simple, auto_config);
+    coz_simple.root_module.addImport("zigpulse", zigpulse_module);
+    
+    // Enable frame pointers for better COZ profiling
+    if (enable_coz) {
+        coz_simple.root_module.omit_frame_pointer = false;
+    }
+    
+    const run_coz_simple = b.addRunArtifact(coz_simple);
+    const coz_simple_step = b.step("coz-simple", "Run simple COZ profiling benchmark");
+    coz_simple_step.dependOn(&run_coz_simple.step);
+    
+    // Intensive COZ benchmark
+    const coz_intensive = b.addExecutable(.{
+        .name = "coz_intensive",
+        .root_source_file = b.path("coz_intensive.zig"),
+        .target = target,
+        .optimize = .ReleaseSafe,
+    });
+    build_config.addBuildOptions(b, coz_intensive, auto_config);
+    coz_intensive.root_module.addImport("zigpulse", zigpulse_module);
+    
+    // COZ frame pointer support
+    if (enable_coz) {
+        coz_intensive.root_module.omit_frame_pointer = false;
+    }
+    
+    const run_coz_intensive = b.addRunArtifact(coz_intensive);
+    const coz_intensive_step = b.step("coz-intensive", "Run intensive COZ profiling benchmark");
+    coz_intensive_step.dependOn(&run_coz_intensive.step);
     
     // Bundle file tests
     const bundle_test = b.addTest(.{

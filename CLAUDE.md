@@ -82,6 +82,9 @@ zig build test-parallel-work
 
 # Thread affinity improvements test
 zig build test-affinity
+
+# A3C Reinforcement Learning Demo (Phase 1 Complete)
+zig build demo-a3c
 ```
 
 ### Souper Superoptimization

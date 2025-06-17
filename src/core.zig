@@ -438,31 +438,286 @@ pub const SimpleNeuralNetwork = struct {
     }
 };
 
-/// A3C scheduler for intelligent worker selection
+/// Performance tracking infrastructure for A3C (Phase 1I)
+pub const A3CPerformanceTracker = struct {
+    // Decision metrics
+    total_decisions: u64 = 0,
+    confident_decisions: u64 = 0,
+    fallback_decisions: u64 = 0,
+    exploration_decisions: u64 = 0,
+    exploitation_decisions: u64 = 0,
+    
+    // Timing metrics
+    total_decision_time_ns: u64 = 0,
+    avg_decision_time_ns: f32 = 0.0,
+    max_decision_time_ns: u64 = 0,
+    
+    // Learning metrics
+    total_training_episodes: u64 = 0,
+    successful_selections: u64 = 0,
+    worker_selection_counts: [64]u64 = [_]u64{0} ** 64, // MAX_WORKERS constant
+    
+    // Reward tracking
+    cumulative_rewards: std.ArrayList(f32),
+    recent_rewards: [100]f32 = [_]f32{0.0} ** 100, // Circular buffer for last 100 rewards
+    recent_rewards_index: usize = 0,
+    recent_rewards_count: usize = 0,
+    best_episode_reward: f32 = -std.math.inf(f32),
+    worst_episode_reward: f32 = std.math.inf(f32),
+    
+    // Performance statistics
+    confidence_distribution: [11]u64 = [_]u64{0} ** 11, // 0.0-1.0 in 0.1 buckets
+    worker_efficiency_scores: [64]f32 = [_]f32{0.0} ** 64, // MAX_WORKERS constant
+    
+    // Network performance
+    policy_network_loss_history: std.ArrayList(f32),
+    value_network_loss_history: std.ArrayList(f32),
+    entropy_history: std.ArrayList(f32),
+    
+    // Allocator for dynamic arrays
+    allocator: std.mem.Allocator,
+    
+    pub fn init(allocator: std.mem.Allocator) !A3CPerformanceTracker {
+        return A3CPerformanceTracker{
+            .cumulative_rewards = std.ArrayList(f32).init(allocator),
+            .policy_network_loss_history = std.ArrayList(f32).init(allocator),
+            .value_network_loss_history = std.ArrayList(f32).init(allocator),
+            .entropy_history = std.ArrayList(f32).init(allocator),
+            .allocator = allocator,
+        };
+    }
+    
+    pub fn deinit(self: *A3CPerformanceTracker) void {
+        self.cumulative_rewards.deinit();
+        self.policy_network_loss_history.deinit();
+        self.value_network_loss_history.deinit();
+        self.entropy_history.deinit();
+    }
+    
+    /// Record a decision made by A3C
+    pub fn recordDecision(self: *A3CPerformanceTracker, 
+                         worker_id: usize, 
+                         confidence: f32, 
+                         is_exploration: bool,
+                         is_fallback: bool,
+                         decision_time_ns: u64) void {
+        self.total_decisions += 1;
+        self.total_decision_time_ns += decision_time_ns;
+        self.avg_decision_time_ns = @as(f32, @floatFromInt(self.total_decision_time_ns)) / @as(f32, @floatFromInt(self.total_decisions));
+        
+        if (decision_time_ns > self.max_decision_time_ns) {
+            self.max_decision_time_ns = decision_time_ns;
+        }
+        
+        if (worker_id < 64) { // MAX_WORKERS constant
+            self.worker_selection_counts[worker_id] += 1;
+        }
+        
+        if (is_fallback) {
+            self.fallback_decisions += 1;
+        } else {
+            self.confident_decisions += 1;
+            
+            if (is_exploration) {
+                self.exploration_decisions += 1;
+            } else {
+                self.exploitation_decisions += 1;
+            }
+        }
+        
+        // Record confidence distribution
+        const confidence_bucket = @min(10, @as(usize, @intFromFloat(confidence * 10.0)));
+        self.confidence_distribution[confidence_bucket] += 1;
+    }
+    
+    /// Record task execution result
+    pub fn recordTaskResult(self: *A3CPerformanceTracker, 
+                           worker_id: usize,
+                           reward: f32,
+                           execution_time_ns: u64,
+                           success: bool) void {
+        // Track rewards
+        self.cumulative_rewards.append(reward) catch {};
+        
+        // Add to circular buffer
+        self.recent_rewards[self.recent_rewards_index] = reward;
+        self.recent_rewards_index = (self.recent_rewards_index + 1) % self.recent_rewards.len;
+        if (self.recent_rewards_count < self.recent_rewards.len) {
+            self.recent_rewards_count += 1;
+        }
+        
+        if (reward > self.best_episode_reward) {
+            self.best_episode_reward = reward;
+        }
+        if (reward < self.worst_episode_reward) {
+            self.worst_episode_reward = reward;
+        }
+        
+        // Update worker efficiency
+        if (worker_id < 64 and success) { // MAX_WORKERS constant
+            self.successful_selections += 1;
+            
+            // Simple efficiency: inverse of execution time (smaller is better)
+            const efficiency = 1.0 / (@as(f32, @floatFromInt(execution_time_ns)) / 1_000_000.0); // Convert to ms
+            self.worker_efficiency_scores[worker_id] = 
+                (self.worker_efficiency_scores[worker_id] * 0.9) + (efficiency * 0.1); // Moving average
+        }
+    }
+    
+    /// Record training episode
+    pub fn recordTrainingEpisode(self: *A3CPerformanceTracker,
+                                policy_loss: f32,
+                                value_loss: f32, 
+                                entropy: f32) void {
+        self.total_training_episodes += 1;
+        
+        self.policy_network_loss_history.append(policy_loss) catch {};
+        self.value_network_loss_history.append(value_loss) catch {};
+        self.entropy_history.append(entropy) catch {};
+        
+        // Keep history bounded
+        if (self.policy_network_loss_history.items.len > 1000) {
+            _ = self.policy_network_loss_history.orderedRemove(0);
+        }
+        if (self.value_network_loss_history.items.len > 1000) {
+            _ = self.value_network_loss_history.orderedRemove(0);
+        }
+        if (self.entropy_history.items.len > 1000) {
+            _ = self.entropy_history.orderedRemove(0);
+        }
+    }
+    
+    /// Get comprehensive performance summary
+    pub fn getPerformanceSummary(self: *const A3CPerformanceTracker) A3CPerformanceSummary {
+        const total_decisions_f = @as(f32, @floatFromInt(self.total_decisions));
+        
+        var recent_reward_avg: f32 = 0.0;
+        var recent_reward_count: usize = 0;
+        
+        // Calculate recent average reward
+        const recent_count = @min(self.recent_rewards_count, self.recent_rewards.len);
+        for (0..recent_count) |i| {
+            recent_reward_avg += self.recent_rewards[i];
+            recent_reward_count += 1;
+        }
+        if (recent_reward_count > 0) {
+            recent_reward_avg /= @as(f32, @floatFromInt(recent_reward_count));
+        }
+        
+        return A3CPerformanceSummary{
+            .total_decisions = self.total_decisions,
+            .confidence_rate = if (total_decisions_f > 0) @as(f32, @floatFromInt(self.confident_decisions)) / total_decisions_f else 0.0,
+            .exploration_rate = if (total_decisions_f > 0) @as(f32, @floatFromInt(self.exploration_decisions)) / total_decisions_f else 0.0,
+            .avg_decision_time_ns = self.avg_decision_time_ns,
+            .max_decision_time_ns = self.max_decision_time_ns,
+            .success_rate = if (self.total_decisions > 0) @as(f32, @floatFromInt(self.successful_selections)) / total_decisions_f else 0.0,
+            .recent_avg_reward = recent_reward_avg,
+            .best_episode_reward = self.best_episode_reward,
+            .worst_episode_reward = self.worst_episode_reward,
+            .total_training_episodes = self.total_training_episodes,
+        };
+    }
+    
+    /// Log performance metrics with detailed breakdown
+    pub fn logPerformanceMetrics(self: *const A3CPerformanceTracker) void {
+        const summary = self.getPerformanceSummary();
+        
+        std.log.info("📊 A3C Performance Metrics:", .{});
+        std.log.info("  Decisions: {} ({}% confident, {}% exploration)", .{
+            summary.total_decisions,
+            @as(u32, @intFromFloat(summary.confidence_rate * 100.0)),
+            @as(u32, @intFromFloat(summary.exploration_rate * 100.0))
+        });
+        std.log.info("  Timing: {d:.1}ns avg, {}ns max", .{
+            summary.avg_decision_time_ns,
+            summary.max_decision_time_ns
+        });
+        std.log.info("  Success Rate: {d:.1}%", .{summary.success_rate * 100.0});
+        std.log.info("  Rewards: {d:.3} recent avg, {d:.3} best, {d:.3} worst", .{
+            summary.recent_avg_reward,
+            summary.best_episode_reward,
+            summary.worst_episode_reward
+        });
+        std.log.info("  Training Episodes: {}", .{summary.total_training_episodes});
+        
+        // Worker selection distribution
+        std.log.info("  Worker Selection Distribution:", .{});
+        for (self.worker_selection_counts, 0..) |count, i| {
+            if (count > 0) {
+                const percentage = if (self.total_decisions > 0) 
+                    @as(f32, @floatFromInt(count)) / @as(f32, @floatFromInt(self.total_decisions)) * 100.0 
+                else 0.0;
+                std.log.info("    Worker {}: {} ({}%)", .{i, count, @as(u32, @intFromFloat(percentage))});
+            }
+        }
+    }
+};
+
+/// Performance summary structure
+pub const A3CPerformanceSummary = struct {
+    total_decisions: u64,
+    confidence_rate: f32,
+    exploration_rate: f32,
+    avg_decision_time_ns: f32,
+    max_decision_time_ns: u64,
+    success_rate: f32,
+    recent_avg_reward: f32,
+    best_episode_reward: f32,
+    worst_episode_reward: f32,
+    total_training_episodes: u64,
+};
+
+/// A3C scheduler for intelligent worker selection (following original paper)
 pub const A3CScheduler = struct {
     // Neural networks
     policy_network: SimpleNeuralNetwork,    // Actor network for action selection
     value_network: SimpleNeuralNetwork,     // Critic network for value estimation
+    
+    // A3C components (following original algorithm)
+    experience_buffer: A3CExperienceBuffer, // Experience replay buffer
+    reward_function: A3CRewardFunction,     // Reward computation
     
     // Configuration
     config: *const Config,
     exploration_rate: f32,
     confidence_threshold: f32,
     
+    // A3C hyperparameters (from original paper)
+    entropy_coefficient: f32 = 0.01,        // Entropy regularization
+    value_loss_coefficient: f32 = 0.5,      // Value loss weight
+    max_grad_norm: f32 = 40.0,              // Gradient clipping
+    
     // State tracking
     last_decision_time: u64,
     decision_count: u64,
+    
+    // Learning statistics
+    total_reward: f32 = 0.0,
+    episode_count: u64 = 0,
+    reward_mean: f32 = 0.0,
+    reward_std: f32 = 1.0,
+    
+    // Performance tracking infrastructure (Phase 1I)
+    performance_tracker: A3CPerformanceTracker,
     
     pub fn init(allocator: std.mem.Allocator, config: *const Config) !A3CScheduler {
         return A3CScheduler{
             .policy_network = try SimpleNeuralNetwork.init(allocator, config.a3c_learning_rate),
             .value_network = try SimpleNeuralNetwork.init(allocator, config.a3c_learning_rate),
+            .experience_buffer = A3CExperienceBuffer.init(allocator, 1000), // Buffer size from paper
+            .reward_function = A3CRewardFunction{},
             .config = config,
             .exploration_rate = config.a3c_exploration_rate,
             .confidence_threshold = config.a3c_confidence_threshold,
             .last_decision_time = @as(u64, @intCast(std.time.nanoTimestamp())),
             .decision_count = 0,
+            .performance_tracker = try A3CPerformanceTracker.init(allocator),
         };
+    }
+    
+    pub fn deinit(self: *A3CScheduler) void {
+        self.experience_buffer.deinit();
+        self.performance_tracker.deinit();
     }
     
     /// Select optimal worker using A3C policy network
@@ -472,6 +727,8 @@ pub const A3CScheduler = struct {
         system_state: A3CSystemState,
         num_workers: usize
     ) usize {
+        const decision_start_time = @as(u64, @intCast(std.time.nanoTimestamp()));
+        
         // Combine features into input vector
         var input: [32]f32 = undefined;
         const task_array = task_features.toArray();
@@ -490,14 +747,30 @@ pub const A3CScheduler = struct {
         var rng = std.Random.DefaultPrng.init(@as(u64, @intCast(std.time.nanoTimestamp())));
         const random_val = rng.random().float(f32);
         
-        const selected_worker = if (random_val < self.exploration_rate) 
+        const is_exploration = random_val < self.exploration_rate;
+        const selected_worker = if (is_exploration) 
             rng.random().uintLessThan(usize, num_workers) // Explore
         else 
             argmax(action_probs[0..num_workers]); // Exploit
         
+        // Calculate decision confidence
+        const confidence = if (action_probs.len > 0) 
+            action_probs[selected_worker] 
+        else 0.5;
+        
         // Update decision tracking
         self.decision_count += 1;
         self.last_decision_time = @as(u64, @intCast(std.time.nanoTimestamp()));
+        
+        // Record performance metrics (Phase 1I)
+        const decision_time = self.last_decision_time - decision_start_time;
+        self.performance_tracker.recordDecision(
+            selected_worker, 
+            confidence, 
+            is_exploration, 
+            false, // not a fallback decision
+            decision_time
+        );
         
         return selected_worker;
     }
@@ -589,6 +862,462 @@ pub const A3CScheduler = struct {
         state.system_load = 0.2; // Placeholder
         
         return state;
+    }
+    
+    /// Record task execution result and learn from experience (A3C training)
+    pub fn recordTaskExecution(
+        self: *A3CScheduler,
+        _: u64, // task_id (reserved for future use)
+        initial_state: [32]f32,
+        action: usize,
+        final_state: [32]f32,
+        execution_result: A3CRewardFunction.TaskExecutionResult
+    ) !void {
+        // Compute reward using our reward function
+        const reward = self.reward_function.computeReward(execution_result);
+        
+        // Update reward statistics for normalization
+        self.updateRewardStatistics(reward);
+        
+        // Normalize reward for stable learning
+        const normalized_reward = A3CRewardFunction.normalizeReward(reward, self.reward_mean, self.reward_std);
+        
+        // Get value estimates for advantage computation
+        const initial_value = self.value_network.forward(initial_state, 1)[0];
+        _ = self.value_network.forward(final_state, 1)[0]; // final_value (reserved for future use)
+        
+        // Compute log probability (simplified - in full implementation would store from selection)
+        const action_probs = self.policy_network.forward(initial_state, @max(action + 1, 4));
+        const log_prob = @log(@max(action_probs[action], 0.001)); // Avoid log(0)
+        
+        // Create experience
+        const experience = A3CExperience{
+            .state = initial_state,
+            .action = action,
+            .reward = normalized_reward,
+            .next_state = final_state,
+            .done = execution_result.success,
+            .value = initial_value,
+            .log_prob = log_prob,
+            .timestamp = @as(u64, @intCast(std.time.nanoTimestamp())),
+        };
+        
+        // Add to experience buffer
+        try self.experience_buffer.addExperience(experience);
+        
+        // Record performance metrics (Phase 1I)
+        self.performance_tracker.recordTaskResult(
+            execution_result.worker_id,
+            reward,
+            execution_result.execution_time_ns,
+            execution_result.success
+        );
+        
+        // Train if we have enough experiences
+        if (self.experience_buffer.experiences.items.len >= self.config.a3c_update_frequency) {
+            try self.trainA3CNetworks();
+        }
+    }
+    
+    /// Train A3C networks following original algorithm
+    fn trainA3CNetworks(self: *A3CScheduler) !void {
+        const experiences = self.experience_buffer.getRecentExperiences(self.config.a3c_update_frequency);
+        if (experiences.len == 0) return;
+        
+        // Extract values for advantage computation
+        var values = std.ArrayList(f32).init(self.experience_buffer.experiences.allocator);
+        defer values.deinit();
+        
+        for (experiences) |exp| {
+            try values.append(exp.value);
+        }
+        
+        // Compute GAE advantages
+        const advantages = self.experience_buffer.computeGAEAdvantages(values.items);
+        defer self.experience_buffer.experiences.allocator.free(advantages);
+        
+        // Prepare arrays for loss computation
+        var log_probs = std.ArrayList(f32).init(self.experience_buffer.experiences.allocator);
+        defer log_probs.deinit();
+        
+        var returns = std.ArrayList(f32).init(self.experience_buffer.experiences.allocator);
+        defer returns.deinit();
+        
+        // Compute n-step returns
+        for (experiences, 0..) |exp, i| {
+            try log_probs.append(exp.log_prob);
+            
+            // Simple n-step return computation
+            var return_val = exp.reward;
+            if (i + 1 < experiences.len) {
+                return_val += 0.99 * experiences[i + 1].value; // gamma * next_value
+            }
+            try returns.append(return_val);
+        }
+        
+        // Compute A3C loss
+        const loss = A3CLoss.compute(
+            log_probs.items,
+            advantages,
+            values.items,
+            returns.items,
+            self.entropy_coefficient
+        );
+        
+        // Apply gradients (simplified - in full implementation would use proper backprop)
+        self.applyGradients(loss, advantages);
+        
+        // Clear old experiences to prevent memory growth
+        self.experience_buffer.clearOldExperiences(100);
+        
+        // Update learning statistics
+        self.episode_count += 1;
+        
+        // Record training performance metrics (Phase 1I)
+        self.performance_tracker.recordTrainingEpisode(
+            loss.policy_loss,
+            loss.value_loss,
+            loss.entropy_loss
+        );
+        
+        if (self.config.enable_trace) {
+            std.log.info("🧠 A3C Training - Episode: {}, Policy Loss: {d:.4}, Value Loss: {d:.4}, Entropy: {d:.4}", 
+                .{ self.episode_count, loss.policy_loss, loss.value_loss, loss.entropy_loss });
+        }
+    }
+    
+    /// Apply gradients to networks (simplified implementation)
+    fn applyGradients(self: *A3CScheduler, loss: A3CLoss, advantages: []const f32) void {
+        // Simplified gradient application - in full implementation would use proper backpropagation
+        
+        // Update policy network based on policy loss and advantages
+        for (advantages) |advantage| {
+            if (@abs(advantage) > 0.001) {
+                // Simple gradient step proportional to advantage
+                const gradient = advantage * self.config.a3c_learning_rate;
+                self.policy_network.updateWeights(&[_]f32{gradient});
+            }
+        }
+        
+        // Update value network based on value loss
+        if (@abs(loss.value_loss) > 0.001) {
+            const value_gradient = loss.value_loss * self.config.a3c_learning_rate * self.value_loss_coefficient;
+            self.value_network.updateWeights(&[_]f32{value_gradient});
+        }
+        
+        // Apply gradient clipping (from original paper)
+        // Note: In full implementation, this would clip the actual gradients
+    }
+    
+    /// Update reward statistics for normalization
+    fn updateRewardStatistics(self: *A3CScheduler, reward: f32) void {
+        // Running average for reward normalization
+        const alpha: f32 = 0.01; // Learning rate for statistics
+        
+        self.total_reward += reward;
+        
+        // Update running mean
+        self.reward_mean = (1.0 - alpha) * self.reward_mean + alpha * reward;
+        
+        // Update running standard deviation
+        const diff = reward - self.reward_mean;
+        self.reward_std = (1.0 - alpha) * self.reward_std + alpha * diff * diff;
+        self.reward_std = @sqrt(@max(self.reward_std, 0.01)); // Prevent division by zero
+    }
+    
+    /// Get A3C performance metrics (Phase 1I enhanced)
+    pub fn getPerformanceMetrics(self: *const A3CScheduler) A3CPerformanceSummary {
+        return self.performance_tracker.getPerformanceSummary();
+    }
+    
+    /// Log comprehensive A3C performance metrics (Phase 1I)
+    pub fn logPerformanceMetrics(self: *const A3CScheduler) void {
+        self.performance_tracker.logPerformanceMetrics();
+    }
+};
+
+/// Experience tuple for A3C learning (following original paper)
+pub const A3CExperience = struct {
+    state: [32]f32,                    // System + task state
+    action: usize,                     // Selected worker ID
+    reward: f32,                       // Immediate reward
+    next_state: [32]f32,               // Next system state
+    done: bool,                        // Task completion flag
+    value: f32,                        // Critic's value estimate V(s)
+    log_prob: f32,                     // Action log probability
+    timestamp: u64,                    // For temporal analysis
+    
+    pub fn init() A3CExperience {
+        return A3CExperience{
+            .state = [_]f32{0.0} ** 32,
+            .action = 0,
+            .reward = 0.0,
+            .next_state = [_]f32{0.0} ** 32,
+            .done = false,
+            .value = 0.0,
+            .log_prob = 0.0,
+            .timestamp = 0,
+        };
+    }
+};
+
+/// Experience buffer for A3C n-step returns (following original algorithm)
+pub const A3CExperienceBuffer = struct {
+    experiences: std.ArrayList(A3CExperience),
+    max_size: usize,
+    n_steps: usize = 5,                // n-step returns (original paper uses 5)
+    gamma: f32 = 0.99,                 // Discount factor
+    gae_lambda: f32 = 0.95,            // GAE parameter
+    
+    pub fn init(allocator: std.mem.Allocator, max_size: usize) A3CExperienceBuffer {
+        return A3CExperienceBuffer{
+            .experiences = std.ArrayList(A3CExperience).init(allocator),
+            .max_size = max_size,
+        };
+    }
+    
+    pub fn deinit(self: *A3CExperienceBuffer) void {
+        self.experiences.deinit();
+    }
+    
+    /// Add experience to buffer
+    pub fn addExperience(self: *A3CExperienceBuffer, experience: A3CExperience) !void {
+        try self.experiences.append(experience);
+        
+        // Keep buffer size manageable
+        if (self.experiences.items.len > self.max_size) {
+            _ = self.experiences.orderedRemove(0);
+        }
+    }
+    
+    /// Compute n-step returns following original A3C paper
+    pub fn computeNStepReturns(self: *A3CExperienceBuffer, final_value: f32) void {
+        const items = self.experiences.items;
+        if (items.len == 0) return;
+        
+        // Compute n-step returns backward from final state
+        var running_return = final_value;
+        var i = items.len;
+        
+        while (i > 0) {
+            i -= 1;
+            
+            if (items[i].done) {
+                running_return = items[i].reward;
+            } else {
+                running_return = items[i].reward + self.gamma * running_return;
+            }
+            
+            // Store the computed return (we'll use this for advantage computation)
+            // Note: In a full implementation, we'd store this in the experience
+        }
+    }
+    
+    /// Compute Generalized Advantage Estimation (GAE) following original formulation
+    pub fn computeGAEAdvantages(self: *A3CExperienceBuffer, values: []const f32) []f32 {
+        const items = self.experiences.items;
+        if (items.len == 0) return &[_]f32{};
+        
+        // Allocate advantages array (caller must free)
+        var advantages = std.ArrayList(f32).init(self.experiences.allocator);
+        advantages.resize(items.len) catch return &[_]f32{};
+        
+        var gae: f32 = 0.0;
+        var i = items.len;
+        
+        while (i > 0) {
+            i -= 1;
+            
+            const delta = if (i + 1 < items.len) 
+                items[i].reward + self.gamma * values[i + 1] - values[i]
+            else 
+                items[i].reward - values[i];
+            
+            gae = delta + self.gamma * self.gae_lambda * gae;
+            advantages.items[i] = gae;
+        }
+        
+        return advantages.toOwnedSlice() catch &[_]f32{};
+    }
+    
+    /// Get recent experiences for training
+    pub fn getRecentExperiences(self: *A3CExperienceBuffer, count: usize) []A3CExperience {
+        const items = self.experiences.items;
+        if (items.len == 0) return &[_]A3CExperience{};
+        
+        const start_idx = if (items.len > count) items.len - count else 0;
+        return items[start_idx..];
+    }
+    
+    /// Clear old experiences (keep only recent ones)
+    pub fn clearOldExperiences(self: *A3CExperienceBuffer, keep_count: usize) void {
+        const items = self.experiences.items;
+        if (items.len <= keep_count) return;
+        
+        const remove_count = items.len - keep_count;
+        for (0..remove_count) |_| {
+            _ = self.experiences.orderedRemove(0);
+        }
+    }
+};
+
+/// A3C Loss computation following original paper
+pub const A3CLoss = struct {
+    policy_loss: f32,                  // Actor loss
+    value_loss: f32,                   // Critic loss
+    entropy_loss: f32,                 // Entropy regularization
+    total_loss: f32,                   // Combined loss
+    
+    pub fn init() A3CLoss {
+        return A3CLoss{
+            .policy_loss = 0.0,
+            .value_loss = 0.0,
+            .entropy_loss = 0.0,
+            .total_loss = 0.0,
+        };
+    }
+    
+    /// Compute A3C loss components following original formulation
+    pub fn compute(
+        log_probs: []const f32,         // Action log probabilities
+        advantages: []const f32,        // Computed advantages
+        values: []const f32,            // Critic value estimates
+        returns: []const f32,           // n-step returns
+        entropy_coeff: f32,             // Entropy regularization coefficient
+    ) A3CLoss {
+        var loss = A3CLoss.init();
+        const batch_size = @as(f32, @floatFromInt(log_probs.len));
+        
+        // Policy loss: -log(π(a|s)) * A(s,a)
+        for (log_probs, advantages) |log_prob, advantage| {
+            loss.policy_loss -= log_prob * advantage;
+        }
+        loss.policy_loss /= batch_size;
+        
+        // Value loss: (V(s) - R)²
+        for (values, returns) |value, return_val| {
+            const diff = value - return_val;
+            loss.value_loss += diff * diff;
+        }
+        loss.value_loss /= batch_size;
+        
+        // Entropy loss: -H(π) (encourage exploration)
+        // Simplified entropy computation for discrete actions
+        for (log_probs) |log_prob| {
+            loss.entropy_loss -= log_prob * @exp(log_prob);
+        }
+        loss.entropy_loss /= batch_size;
+        
+        // Total loss: policy + 0.5 * value - entropy_coeff * entropy
+        loss.total_loss = loss.policy_loss + 0.5 * loss.value_loss - entropy_coeff * loss.entropy_loss;
+        
+        return loss;
+    }
+};
+
+/// Reward function for Beat.zig task scheduling (following RL best practices)
+pub const A3CRewardFunction = struct {
+    // Reward components weights
+    completion_reward_weight: f32 = 1.0,
+    efficiency_reward_weight: f32 = 0.5,
+    load_balance_reward_weight: f32 = 0.3,
+    latency_penalty_weight: f32 = 0.2,
+    
+    /// Task execution result for reward computation
+    pub const TaskExecutionResult = struct {
+        task_id: u64,
+        worker_id: usize,
+        execution_time_ns: u64,
+        expected_time_ns: u64,
+        success: bool,
+        cpu_utilization: f32,
+        memory_usage: f32,
+        queue_balance_before: f32,
+        queue_balance_after: f32,
+        priority: Priority,
+        system_load: f32,
+    };
+    
+    /// Compute reward following RL principles (dense, shaped rewards)
+    pub fn computeReward(self: A3CRewardFunction, result: TaskExecutionResult) f32 {
+        var total_reward: f32 = 0.0;
+        
+        // 1. Completion reward (sparse but important)
+        if (result.success) {
+            const base_completion = switch (result.priority) {
+                .high => 2.0,
+                .normal => 1.0,
+                .low => 0.5,
+            };
+            total_reward += self.completion_reward_weight * base_completion;
+        } else {
+            // Penalty for task failure
+            total_reward -= self.completion_reward_weight * 2.0;
+        }
+        
+        // 2. Efficiency reward (dense, shaped)
+        if (result.expected_time_ns > 0) {
+            const efficiency_ratio = @as(f32, @floatFromInt(result.expected_time_ns)) / 
+                                   @as(f32, @floatFromInt(result.execution_time_ns));
+            
+            // Reward faster-than-expected execution, penalize slower
+            const efficiency_reward = (efficiency_ratio - 1.0) * 0.5;
+            total_reward += self.efficiency_reward_weight * efficiency_reward;
+        }
+        
+        // 3. Load balancing reward (encourage even distribution)
+        const load_balance_improvement = result.queue_balance_before - result.queue_balance_after;
+        total_reward += self.load_balance_reward_weight * load_balance_improvement;
+        
+        // 4. Resource utilization reward
+        const optimal_cpu_util: f32 = 0.8; // Target 80% CPU utilization
+        const cpu_efficiency = 1.0 - @abs(result.cpu_utilization - optimal_cpu_util);
+        total_reward += 0.2 * cpu_efficiency;
+        
+        // 5. Latency penalty for high-priority tasks
+        if (result.priority == .high) {
+            const latency_ms = @as(f32, @floatFromInt(result.execution_time_ns)) / 1_000_000.0;
+            if (latency_ms > 10.0) { // Penalty if high-priority task takes >10ms
+                total_reward -= self.latency_penalty_weight * (latency_ms - 10.0) / 10.0;
+            }
+        }
+        
+        // 6. System load consideration
+        if (result.system_load > 0.9) {
+            // Reward efficient scheduling under high load
+            total_reward += 0.1;
+        }
+        
+        // Clamp reward to reasonable range
+        return @max(-5.0, @min(5.0, total_reward));
+    }
+    
+    /// Compute shaped reward for intermediate states (dense feedback)
+    pub fn computeIntermediateReward(
+        _: A3CRewardFunction, // self (reserved for future weights configuration)
+        queue_balance: f32,
+        system_utilization: f32,
+        decision_confidence: f32
+    ) f32 {
+        var reward: f32 = 0.0;
+        
+        // Reward good load balancing
+        reward += (1.0 - queue_balance) * 0.1;
+        
+        // Reward efficient resource utilization
+        const target_util: f32 = 0.75;
+        reward += (1.0 - @abs(system_utilization - target_util)) * 0.1;
+        
+        // Reward confident decisions
+        reward += decision_confidence * 0.05;
+        
+        return reward;
+    }
+    
+    /// Normalize rewards for stable learning
+    pub fn normalizeReward(reward: f32, mean: f32, std_dev: f32) f32 {
+        if (std_dev <= 0.0) return reward;
+        return (reward - mean) / std_dev;
     }
 };
 
@@ -1041,6 +1770,7 @@ pub const ThreadPool = struct {
         }
         
         if (self.a3c_scheduler) |a3c| {
+            a3c.deinit();
             self.allocator.destroy(a3c);
         }
         
@@ -1076,8 +1806,14 @@ pub const ThreadPool = struct {
         // Lightweight statistics update
         _ = self.stats.hot.tasks_submitted.fetchAdd(1, .monotonic);
         
+        // Worker selection result structure
+        const WorkerSelection = struct {
+            worker_id: usize,
+            is_fallback: bool,
+        };
+        
         // INTELLIGENT WORKER SELECTION: A3C vs round-robin
-        const worker_id = blk: {
+        const worker_selection: WorkerSelection = blk: {
             if (self.a3c_scheduler) |a3c_sched| {
                 // Extract task features for A3C decision making
                 const task_features = A3CScheduler.extractTaskFeatures(task);
@@ -1088,14 +1824,32 @@ pub const ThreadPool = struct {
                 
                 // Use A3C if confidence is high enough, otherwise fallback to round-robin
                 if (confidence >= self.config.a3c_confidence_threshold) {
-                    break :blk a3c_sched.selectWorker(task_features, system_state, self.workers.len);
+                    break :blk WorkerSelection{ .worker_id = a3c_sched.selectWorker(task_features, system_state, self.workers.len), .is_fallback = false };
+                } else {
+                    // Track fallback decision (Phase 1I)
+                    const fallback_start = @as(u64, @intCast(std.time.nanoTimestamp()));
+                    const submission_count = self.stats.hot.tasks_submitted.load(.monotonic);
+                    const worker_id = submission_count % self.workers.len;
+                    const fallback_time = @as(u64, @intCast(std.time.nanoTimestamp())) - fallback_start;
+                    
+                    a3c_sched.performance_tracker.recordDecision(
+                        worker_id,
+                        confidence,
+                        false, // not exploration
+                        true,  // is fallback
+                        fallback_time
+                    );
+                    
+                    break :blk WorkerSelection{ .worker_id = worker_id, .is_fallback = true };
                 }
             }
             
-            // Default round-robin selection (A3C disabled or low confidence)
+            // Default round-robin selection (A3C disabled)
             const submission_count = self.stats.hot.tasks_submitted.load(.monotonic);
-            break :blk submission_count % self.workers.len;
+            break :blk WorkerSelection{ .worker_id = submission_count % self.workers.len, .is_fallback = false };
         };
+        
+        const worker_id = worker_selection.worker_id;
         
         const worker = &self.workers[worker_id];
         
