@@ -72,18 +72,7 @@ pub fn build(b: *std.Build) void {
     const bench_step = b.step("bench", "Run benchmarks");
     bench_step.dependOn(&run_benchmark.step);
     
-    // Examples
-    const example_exe = b.addExecutable(.{
-        .name = "examples",
-        .root_source_file = b.path("examples.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    b.installArtifact(example_exe);
-    
-    const run_example = b.addRunArtifact(example_exe);
-    const example_step = b.step("examples", "Run examples");
-    example_step.dependOn(&run_example.step);
+    // Note: examples.zig does not exist at root - use examples/ directory
     
     // Modular usage example
     const modular_example = b.addExecutable(.{
@@ -130,10 +119,10 @@ pub fn build(b: *std.Build) void {
     const a3c_demo_step = b.step("demo-a3c", "Run A3C Reinforcement Learning demo");
     a3c_demo_step.dependOn(&run_a3c_demo.step);
     
-    // Intensive profiling benchmark
+    // Intensive profiling benchmark - using benchmarks directory
     const profile_benchmark = b.addExecutable(.{
         .name = "profile_intensive_benchmark",
-        .root_source_file = b.path("profile_intensive_benchmark.zig"),
+        .root_source_file = b.path("benchmarks/profile_intensive_benchmark.zig"),
         .target = target,
         .optimize = .ReleaseFast, // Fast for realistic profiling
     });
@@ -147,7 +136,7 @@ pub fn build(b: *std.Build) void {
     // Simple COZ benchmark
     const coz_simple = b.addExecutable(.{
         .name = "coz_benchmark_simple",
-        .root_source_file = b.path("coz_benchmark_simple.zig"),
+        .root_source_file = b.path("benchmarks/coz_benchmark_simple.zig"),
         .target = target,
         .optimize = .ReleaseSafe, // Better for COZ profiling
     });
@@ -163,10 +152,10 @@ pub fn build(b: *std.Build) void {
     const coz_simple_step = b.step("coz-simple", "Run simple COZ profiling benchmark");
     coz_simple_step.dependOn(&run_coz_simple.step);
     
-    // Intensive COZ benchmark
+    // Intensive COZ benchmark - using benchmarks directory
     const coz_intensive = b.addExecutable(.{
         .name = "coz_intensive",
-        .root_source_file = b.path("coz_intensive.zig"),
+        .root_source_file = b.path("benchmarks/coz_intensive.zig"),
         .target = target,
         .optimize = .ReleaseSafe,
     });
@@ -185,7 +174,7 @@ pub fn build(b: *std.Build) void {
     // Cache-line alignment benchmark
     const cache_alignment_benchmark = b.addExecutable(.{
         .name = "benchmark_cache_alignment",
-        .root_source_file = b.path("benchmark_cache_alignment.zig"),
+        .root_source_file = b.path("benchmarks/benchmark_cache_alignment.zig"),
         .target = target,
         .optimize = .ReleaseFast, // Use ReleaseFast for accurate performance measurement
     });
@@ -199,7 +188,7 @@ pub fn build(b: *std.Build) void {
     // Memory prefetching benchmark
     const prefetching_benchmark = b.addExecutable(.{
         .name = "benchmark_prefetching",
-        .root_source_file = b.path("benchmark_prefetching.zig"),
+        .root_source_file = b.path("benchmarks/benchmark_prefetching.zig"),
         .target = target,
         .optimize = .ReleaseFast, // Use ReleaseFast for accurate memory performance measurement
     });
@@ -213,7 +202,7 @@ pub fn build(b: *std.Build) void {
     // Batch formation optimization benchmark
     const batch_formation_benchmark = b.addExecutable(.{
         .name = "benchmark_batch_formation",
-        .root_source_file = b.path("benchmark_batch_formation.zig"),
+        .root_source_file = b.path("benchmarks/benchmark_batch_formation.zig"),
         .target = target,
         .optimize = .ReleaseFast, // Use ReleaseFast for accurate batch formation timing
     });
@@ -224,9 +213,9 @@ pub fn build(b: *std.Build) void {
     const batch_formation_step = b.step("bench-batch-formation", "Benchmark batch formation optimizations");
     batch_formation_step.dependOn(&run_batch_formation_benchmark.step);
     
-    // Bundle file tests
+    // Bundle file tests - using beat.zig as the bundle file
     const bundle_test = b.addTest(.{
-        .root_source_file = b.path("zigpulse.zig"),
+        .root_source_file = b.path("beat.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -256,9 +245,9 @@ pub fn build(b: *std.Build) void {
     
     // Note: Legacy test executables removed - all tests now run via main test suite
     
-    // Build configuration demo (as test)
+    // Build configuration demo (as test) - using examples directory
     const build_config_demo = b.addTest(.{
-        .root_source_file = b.path("build_config_demo.zig"),
+        .root_source_file = b.path("examples/build_config_demo.zig"),
         .target = target,
         .optimize = .Debug,
     });
@@ -268,9 +257,9 @@ pub fn build(b: *std.Build) void {
     const build_config_demo_step = b.step("demo-config", "Run build configuration demo");
     build_config_demo_step.dependOn(&run_build_config_demo.step);
     
-    // Comptime work distribution demo
+    // Comptime work distribution demo - using examples directory
     const comptime_work_demo = b.addTest(.{
-        .root_source_file = b.path("comptime_work_demo.zig"),
+        .root_source_file = b.path("examples/comptime_work_demo.zig"),
         .target = target,
         .optimize = .Debug,
     });
@@ -350,9 +339,9 @@ pub fn build(b: *std.Build) void {
     const development_mode_test_step = b.step("test-development-mode", "Test development mode configuration features");
     development_mode_test_step.dependOn(&run_development_mode_test.step);
     
-    // Auto-configuration integration demo
+    // Auto-configuration integration demo - using examples directory
     const auto_config_integration_demo = b.addTest(.{
-        .root_source_file = b.path("auto_config_integration_demo.zig"),
+        .root_source_file = b.path("examples/auto_config_integration_demo.zig"),
         .target = target,
         .optimize = .Debug,
     });
@@ -626,157 +615,18 @@ pub fn build(b: *std.Build) void {
     simd_benchmark_test_step.dependOn(&run_simd_benchmark_test.step);
     
     
-    // ML-based classification integration test (Task 3.2.2)
-    const ml_integration_test = b.addTest(.{
-        .root_source_file = b.path("test_ml_integration.zig"),
-        .target = target,
-        .optimize = .Debug,
-    });
-    ml_integration_test.root_module.addImport("beat", zigpulse_module);
-    build_config.addBuildOptions(b, ml_integration_test, auto_config);
+    // Note: test_ml_integration.zig does not exist at root - ML integration tests moved to tests/ directory
     
-    const run_ml_integration_test = b.addRunArtifact(ml_integration_test);
-    const ml_integration_test_step = b.step("test-ml-integration", "Test ML-based classification for heterogeneous computing (Task 3.2.2)");
-    ml_integration_test_step.dependOn(&run_ml_integration_test.step);
+    // Legacy benchmarks removed - use optimized benchmark suite
     
-    // Advanced scheduling benchmark
-    const advanced_scheduling_benchmark = b.addExecutable(.{
-        .name = "benchmark_advanced_scheduling",
-        .root_source_file = b.path("benchmark_advanced_scheduling.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, advanced_scheduling_benchmark, auto_config);
+    // Legacy optimization tests removed - functionality integrated into main test suite
     
-    const run_advanced_scheduling_benchmark = b.addRunArtifact(advanced_scheduling_benchmark);
-    const advanced_scheduling_benchmark_step = b.step("bench-advanced-scheduling", "Benchmark advanced predictive scheduling performance improvements");
-    advanced_scheduling_benchmark_step.dependOn(&run_advanced_scheduling_benchmark.step);
+    // Note: fixed_cache_optimization.zig does not exist at root - cache optimization integrated into main library
     
-    // Simple scheduling benchmark
-    const simple_scheduling_benchmark = b.addExecutable(.{
-        .name = "benchmark_simple_scheduling",
-        .root_source_file = b.path("benchmark_simple_scheduling.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, simple_scheduling_benchmark, auto_config);
-    
-    const run_simple_scheduling_benchmark = b.addRunArtifact(simple_scheduling_benchmark);
-    const simple_scheduling_benchmark_step = b.step("bench-simple-scheduling", "Simple focused benchmark for advanced scheduling features");
-    simple_scheduling_benchmark_step.dependOn(&run_simple_scheduling_benchmark.step);
-    
-    // Prediction accuracy micro-benchmark
-    const prediction_accuracy_benchmark = b.addExecutable(.{
-        .name = "benchmark_prediction_accuracy",
-        .root_source_file = b.path("benchmark_prediction_accuracy.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, prediction_accuracy_benchmark, auto_config);
-    
-    const run_prediction_accuracy_benchmark = b.addRunArtifact(prediction_accuracy_benchmark);
-    const prediction_accuracy_benchmark_step = b.step("bench-prediction-accuracy", "Micro-benchmarks for prediction accuracy measurement (Task 2.5.1)");
-    prediction_accuracy_benchmark_step.dependOn(&run_prediction_accuracy_benchmark.step);
-    
-    // A/B testing framework
-    const ab_testing_framework = b.addExecutable(.{
-        .name = "ab_testing_framework",
-        .root_source_file = b.path("ab_testing_framework.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, ab_testing_framework, auto_config);
-    
-    const run_ab_testing_framework = b.addRunArtifact(ab_testing_framework);
-    const ab_testing_framework_step = b.step("ab-test", "A/B testing infrastructure for scheduling comparison (Task 2.5.1.2)");
-    ab_testing_framework_step.dependOn(&run_ab_testing_framework.step);
-    
-    // Enhanced COZ profiler benchmark
-    const coz_enhanced_benchmark = b.addExecutable(.{
-        .name = "benchmark_coz_enhanced",
-        .root_source_file = b.path("benchmark_coz_enhanced.zig"),
-        .target = target,
-        .optimize = if (enable_coz) .ReleaseSafe else .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, coz_enhanced_benchmark, auto_config);
-    
-    if (enable_coz) {
-        coz_enhanced_benchmark.root_module.omit_frame_pointer = false;
-    }
-    
-    const run_coz_enhanced_benchmark = b.addRunArtifact(coz_enhanced_benchmark);
-    const coz_enhanced_benchmark_step = b.step("bench-coz-enhanced", "Enhanced COZ profiler integration benchmark (Task 2.5.1.3)");
-    coz_enhanced_benchmark_step.dependOn(&run_coz_enhanced_benchmark.step);
-    
-    // Fingerprint cache optimization
-    const cache_optimization = b.addExecutable(.{
-        .name = "fingerprint_cache_optimization",
-        .root_source_file = b.path("fingerprint_cache_optimization.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, cache_optimization, auto_config);
-    
-    const run_cache_optimization = b.addRunArtifact(cache_optimization);
-    const cache_optimization_step = b.step("test-cache-optimization", "Test prediction lookup caching optimization");
-    cache_optimization_step.dependOn(&run_cache_optimization.step);
-    
-    // Optimization validation framework
-    const optimization_validation = b.addExecutable(.{
-        .name = "optimization_validation",
-        .root_source_file = b.path("optimization_validation.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, optimization_validation, auto_config);
-    
-    const run_optimization_validation = b.addRunArtifact(optimization_validation);
-    const optimization_validation_step = b.step("validate-optimizations", "Validate optimization performance improvements");
-    optimization_validation_step.dependOn(&run_optimization_validation.step);
-    
-    // Worker selection fast path optimization
-    const worker_selection_optimization = b.addExecutable(.{
-        .name = "worker_selection_optimization",
-        .root_source_file = b.path("worker_selection_optimization.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, worker_selection_optimization, auto_config);
-    
-    const run_worker_selection_optimization = b.addRunArtifact(worker_selection_optimization);
-    const worker_selection_optimization_step = b.step("test-worker-selection-optimization", "Test worker selection fast path optimization to reduce 120.6x overhead");
-    worker_selection_optimization_step.dependOn(&run_worker_selection_optimization.step);
-    
-    // Integrated worker selection optimization test
-    const integrated_worker_optimization = b.addExecutable(.{
-        .name = "optimized_worker_selection_integration",
-        .root_source_file = b.path("optimized_worker_selection_integration.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, integrated_worker_optimization, auto_config);
-    
-    const run_integrated_worker_optimization = b.addRunArtifact(integrated_worker_optimization);
-    const integrated_worker_optimization_step = b.step("test-integrated-worker-optimization", "Test integrated worker selection optimization for direct ThreadPool integration");
-    integrated_worker_optimization_step.dependOn(&run_integrated_worker_optimization.step);
-    
-    // Fixed cache optimization test
-    const fixed_cache_optimization = b.addExecutable(.{
-        .name = "fixed_cache_optimization",
-        .root_source_file = b.path("fixed_cache_optimization.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    build_config.addBuildOptions(b, fixed_cache_optimization, auto_config);
-    
-    const run_fixed_cache_optimization = b.addRunArtifact(fixed_cache_optimization);
-    const fixed_cache_optimization_step = b.step("test-fixed-cache-optimization", "Test fixed prediction lookup caching with proper memory management");
-    fixed_cache_optimization_step.dependOn(&run_fixed_cache_optimization.step);
-    
-    // Batch formation profiling
+    // Batch formation profiling - using examples directory
     const batch_formation_profile = b.addExecutable(.{
         .name = "batch_formation_profile",
-        .root_source_file = b.path("batch_formation_profile.zig"),
+        .root_source_file = b.path("examples/batch_formation_profile.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
@@ -787,10 +637,10 @@ pub fn build(b: *std.Build) void {
     const batch_formation_profile_step = b.step("profile-batch-formation", "Profile batch formation performance bottlenecks");
     batch_formation_profile_step.dependOn(&run_batch_formation_profile.step);
     
-    // Work-stealing efficiency benchmark with fast path optimization
+    // Work-stealing efficiency benchmark with fast path optimization - using examples directory
     const work_stealing_benchmark = b.addExecutable(.{
         .name = "work_stealing_benchmark",
-        .root_source_file = b.path("work_stealing_benchmark.zig"),
+        .root_source_file = b.path("examples/work_stealing_benchmark.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
@@ -804,7 +654,7 @@ pub fn build(b: *std.Build) void {
     // Lock-free contention analysis benchmark
     const lockfree_contention_benchmark = b.addExecutable(.{
         .name = "benchmark_lockfree_contention",
-        .root_source_file = b.path("benchmark_lockfree_contention.zig"),
+        .root_source_file = b.path("benchmarks/benchmark_lockfree_contention.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
@@ -818,7 +668,7 @@ pub fn build(b: *std.Build) void {
     // Worker selection optimization benchmark
     const worker_selection_benchmark = b.addExecutable(.{
         .name = "benchmark_worker_selection",
-        .root_source_file = b.path("benchmark_worker_selection.zig"),
+        .root_source_file = b.path("benchmarks/benchmark_worker_selection.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
@@ -832,7 +682,7 @@ pub fn build(b: *std.Build) void {
     // Worker selection optimization validation benchmark
     const worker_selection_optimized_benchmark = b.addExecutable(.{
         .name = "benchmark_worker_selection_optimized",
-        .root_source_file = b.path("benchmark_worker_selection_optimized.zig"),
+        .root_source_file = b.path("benchmarks/benchmark_worker_selection_optimized.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
@@ -1085,10 +935,10 @@ pub fn build(b: *std.Build) void {
         const ispc_benchmark_step = b.step("bench-ispc", "Benchmark ISPC SPMD performance vs native Zig implementations");
         ispc_benchmark_step.dependOn(&run_ispc_benchmark.step);
         
-        // Optimized ISPC kernels test
+        // Optimized ISPC kernels test - using tests directory
         const optimized_kernels_test = b.addExecutable(.{
             .name = "test_optimized_kernels",
-            .root_source_file = b.path("test_optimized_kernels.zig"),
+            .root_source_file = b.path("tests/test_optimized_kernels.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -1109,10 +959,10 @@ pub fn build(b: *std.Build) void {
         const optimized_kernels_test_step = b.step("test-optimized-kernels", "Test ultra-optimized mega-batch ISPC kernels with overhead reduction");
         optimized_kernels_test_step.dependOn(&run_optimized_kernels_test.step);
         
-        // Heartbeat scheduling ISPC kernels test
+        // Heartbeat scheduling ISPC kernels test - using tests directory
         const heartbeat_kernels_test = b.addExecutable(.{
             .name = "test_heartbeat_kernels",
-            .root_source_file = b.path("test_heartbeat_kernels.zig"),
+            .root_source_file = b.path("tests/test_heartbeat_kernels.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -1133,9 +983,9 @@ pub fn build(b: *std.Build) void {
         const heartbeat_kernels_test_step = b.step("test-heartbeat-kernels", "Test ISPC heartbeat scheduling and worker management kernels");
         heartbeat_kernels_test_step.dependOn(&run_heartbeat_kernels_test.step);
         
-        // Advanced ISPC Research Test Suite (Phase 3 Deep Dive)
+        // Advanced ISPC Research Test Suite (Phase 3 Deep Dive) - using tests directory
         const advanced_ispc_research_test = b.addTest(.{
-            .root_source_file = b.path("test_advanced_ispc_research.zig"),
+            .root_source_file = b.path("tests/test_advanced_ispc_research.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -1157,9 +1007,9 @@ pub fn build(b: *std.Build) void {
         const advanced_ispc_research_test_step = b.step("test-advanced-ispc-research", "Test cutting-edge ISPC features: tasks, GPU, @ispc builtin prototype");
         advanced_ispc_research_test_step.dependOn(&run_advanced_ispc_research_test.step);
         
-        // Prediction Integration Test Suite (Production Integration)
+        // Prediction Integration Test Suite (Production Integration) - using tests directory
         const prediction_integration_test = b.addTest(.{
-            .root_source_file = b.path("test_prediction_integration.zig"),
+            .root_source_file = b.path("tests/test_prediction_integration.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -1181,9 +1031,9 @@ pub fn build(b: *std.Build) void {
         prediction_integration_test_step.dependOn(&run_prediction_integration_test.step);
     }
     
-    // Souper mathematical optimization integration test
+    // Souper mathematical optimization integration test - using tests directory
     const souper_integration_test = b.addTest(.{
-        .root_source_file = b.path("test_souper_integration.zig"),
+        .root_source_file = b.path("tests/test_souper_integration.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -1193,9 +1043,9 @@ pub fn build(b: *std.Build) void {
     const souper_integration_test_step = b.step("test-souper-integration", "Test Souper mathematical optimizations with formal verification");
     souper_integration_test_step.dependOn(&run_souper_integration_test.step);
     
-    // Souper simple test (without ISPC dependencies)
+    // Souper simple test (without ISPC dependencies) - using tests directory
     const souper_simple_test = b.addTest(.{
-        .root_source_file = b.path("test_souper_simple.zig"),
+        .root_source_file = b.path("tests/test_souper_simple.zig"),
         .target = target,
         .optimize = optimize,
     });
