@@ -29,6 +29,7 @@ pub const simd_benchmark = @import("simd_benchmark.zig");
 pub const mathematical_optimizations = @import("mathematical_optimizations.zig");
 pub const souper_integration = @import("souper_integration.zig");
 pub const prefetch = @import("prefetch.zig");
+pub const batch_optimizer = @import("batch_optimizer.zig");
 // TODO: Re-enable A3C module after resolving WSL file system compilation issue
 // pub const a3c = @import("a3c.zig");
 

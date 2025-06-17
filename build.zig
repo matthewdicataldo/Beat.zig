@@ -210,6 +210,20 @@ pub fn build(b: *std.Build) void {
     const prefetching_step = b.step("bench-prefetching", "Benchmark memory prefetching optimizations");
     prefetching_step.dependOn(&run_prefetching_benchmark.step);
     
+    // Batch formation optimization benchmark
+    const batch_formation_benchmark = b.addExecutable(.{
+        .name = "benchmark_batch_formation",
+        .root_source_file = b.path("benchmark_batch_formation.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Use ReleaseFast for accurate batch formation timing
+    });
+    build_config.addBuildOptions(b, batch_formation_benchmark, auto_config);
+    batch_formation_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    
+    const run_batch_formation_benchmark = b.addRunArtifact(batch_formation_benchmark);
+    const batch_formation_step = b.step("bench-batch-formation", "Benchmark batch formation optimizations");
+    batch_formation_step.dependOn(&run_batch_formation_benchmark.step);
+    
     // Bundle file tests
     const bundle_test = b.addTest(.{
         .root_source_file = b.path("zigpulse.zig"),
