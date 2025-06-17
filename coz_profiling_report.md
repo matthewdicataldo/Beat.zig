@@ -1,6 +1,6 @@
 # ZigPulse COZ Profiling Report
 
-Generated: Mon Jun 16 16:37:19 PDT 2025
+Generated: Mon Jun 16 18:55:13 PDT 2025
 Build mode: ReleaseSafe
 
 ## Key Findings
