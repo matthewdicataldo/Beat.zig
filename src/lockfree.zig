@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
+const continuation = @import("continuation.zig");
 
 // Lock-free data structures for ZigPulse
 
@@ -14,6 +15,101 @@ pub fn Task(comptime T: type) type {
         next: ?*@This() = null, // For free list
     };
 }
+
+// ============================================================================
+// Work Item for Continuation Stealing
+// ============================================================================
+
+/// Hybrid work item that can contain either a task or continuation
+/// Enables continuation stealing within existing work-stealing infrastructure
+pub const WorkItem = union(enum) {
+    task: *anyopaque,           // Pointer to Task
+    continuation: *continuation.Continuation,  // Pointer to Continuation
+    
+    const Self = @This();
+    
+    /// Create work item from task
+    pub fn fromTask(task: *anyopaque) Self {
+        return Self{ .task = task };
+    }
+    
+    /// Create work item from continuation  
+    pub fn fromContinuation(cont: *continuation.Continuation) Self {
+        return Self{ .continuation = cont };
+    }
+    
+    /// Check if work item is a task
+    pub fn isTask(self: Self) bool {
+        return switch (self) {
+            .task => true,
+            .continuation => false,
+        };
+    }
+    
+    /// Check if work item is a continuation
+    pub fn isContinuation(self: Self) bool {
+        return switch (self) {
+            .task => false,
+            .continuation => true,
+        };
+    }
+    
+    /// Get task pointer (caller must verify isTask() first)
+    pub fn getTask(self: Self) *anyopaque {
+        return switch (self) {
+            .task => |task| task,
+            .continuation => unreachable,
+        };
+    }
+    
+    /// Get continuation pointer (caller must verify isContinuation() first)
+    pub fn getContinuation(self: Self) *continuation.Continuation {
+        return switch (self) {
+            .task => unreachable,
+            .continuation => |cont| cont,
+        };
+    }
+    
+    /// Execute the work item (task or continuation)
+    pub fn execute(self: Self, worker_id: u32) void {
+        switch (self) {
+            .task => |task| {
+                // Execute task using existing mechanism
+                // Note: This requires the caller to cast to proper Task type
+                _ = task; // Placeholder - actual execution handled by caller
+            },
+            .continuation => |cont| {
+                // Execute continuation
+                cont.markRunning(worker_id);
+                cont.execute();
+            },
+        }
+    }
+    
+    /// Get priority for scheduling (higher value = higher priority)
+    pub fn getPriority(self: Self) u32 {
+        return switch (self) {
+            .task => 1000, // Default task priority
+            .continuation => |cont| cont.getPriority(),
+        };
+    }
+    
+    /// Check if work item can be stolen
+    pub fn canBeStolen(self: Self) bool {
+        return switch (self) {
+            .task => true, // Tasks can always be stolen
+            .continuation => |cont| cont.canBeStolen(),
+        };
+    }
+    
+    /// Mark work item as stolen
+    pub fn markStolen(self: Self, new_worker_id: u32) void {
+        switch (self) {
+            .task => {}, // Tasks don't track stealing state
+            .continuation => |cont| cont.markStolen(new_worker_id),
+        }
+    }
+};
 
 // ============================================================================
 // Work-Stealing Deque (Chase-Lev Algorithm)

@@ -529,6 +529,18 @@ pub fn build(b: *std.Build) void {
     const simd_benchmark_test_step = b.step("test-simd-benchmark", "Test comprehensive SIMD benchmarking and validation framework");
     simd_benchmark_test_step.dependOn(&run_simd_benchmark_test.step);
     
+    // Continuation stealing test (Task 7.1)
+    const continuation_stealing_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_stealing.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    continuation_stealing_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, continuation_stealing_test, auto_config);
+    
+    const run_continuation_stealing_test = b.addRunArtifact(continuation_stealing_test);
+    const continuation_stealing_test_step = b.step("test-continuation-stealing", "Test continuation stealing implementation");
+    continuation_stealing_test_step.dependOn(&run_continuation_stealing_test.step);
     
     // ML-based classification integration test (Task 3.2.2)
     const ml_integration_test = b.addTest(.{
