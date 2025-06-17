@@ -1,4 +1,4 @@
-# Formal Verification Strategy for beat.zig
+# beat.zig formal_verification_strat
 
 ## Overview
 

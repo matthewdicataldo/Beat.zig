@@ -1,4 +1,4 @@
-# ZigPulse v3 Architecture
+# beat.zig arch
 
 ## Overview
 
