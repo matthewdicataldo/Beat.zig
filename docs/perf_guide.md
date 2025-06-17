@@ -1,4 +1,4 @@
-# ZigPulse v3 Performance Guide
+# beat.zig perf_guide
 
 ## Performance Characteristics
 
@@ -419,18 +419,3 @@ amd_uprof --memory-access
 - Compress data structures
 - Use SIMD for bulk operations
 - Distribute across NUMA nodes
-
-## Performance Checklist
-
-Before deployment, verify:
-
-- [ ] Task granularity >10μs
-- [ ] Memory allocation minimized in hot paths
-- [ ] False sharing eliminated
-- [ ] NUMA locality optimized
-- [ ] Thread affinity configured
-- [ ] Lock contention <5% of runtime
-- [ ] Cache miss rate acceptable
-- [ ] Scaling efficiency >80% up to core count
-- [ ] No unexpected thread migrations
-- [ ] Performance meets requirements under load

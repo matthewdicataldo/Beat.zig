@@ -1,5 +1,3 @@
-
-
 # **A Comprehensive Guide to Superoptimization of Zig Code with Souper and Minotaur**
 
 ## **Introduction**

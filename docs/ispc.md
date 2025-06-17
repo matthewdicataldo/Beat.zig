@@ -1,4 +1,4 @@
-# Beat.zig ISPC Acceleration Guide
+# beat.zig ispc
 
 ## Overview
 
@@ -16,14 +16,14 @@ Beat.zig now includes **transparent ISPC (Intel SPMD Program Compiler) accelerat
 
 ### Accelerated Operations
 
-| Operation | Speedup | Description |
-|-----------|---------|-------------|
-| Fingerprint Similarity | 6-23x | SPMD parallel similarity computation |
-| Similarity Matrix | 10-50x | Vectorized O(n²) matrix operations |
-| One Euro Filter | 10-15x | Batch predictive filtering |
-| Multi-Factor Confidence | 8-20x | Parallel confidence calculation |
-| Worker Selection | 5-12x | Vectorized scoring algorithms |
-| Prediction Lookup | 3-8x | Cache-optimized batch processing |
+| Operation               | Speedup | Description                          |
+|-------------------------|---------|--------------------------------------|
+| Fingerprint Similarity  | 6-23x   | SPMD parallel similarity computation |
+| Similarity Matrix       | 10-50x  | Vectorized O(n²) matrix operations   |
+| One Euro Filter         | 10-15x  | Batch predictive filtering           |
+| Multi-Factor Confidence | 8-20x   | Parallel confidence calculation      |
+| Worker Selection        | 5-12x   | Vectorized scoring algorithms        |
+| Prediction Lookup       | 3-8x    | Cache-optimized batch processing     |
 
 ### Transparent Integration
 
@@ -131,13 +131,13 @@ if (batch_size >= threshold && ISPC_available) {
 
 ### Supported Architectures
 
-| Architecture | ISPC Target | Vector Width | Status |
-|--------------|-------------|--------------|---------|
-| x86_64 + SSE4 | sse4-i32x4 | 4 elements | ✅ Tested |
-| x86_64 + AVX | avx1-i32x8 | 8 elements | ✅ Tested |
-| x86_64 + AVX2 | avx2-i32x8 | 8 elements | ✅ Tested |
-| x86_64 + AVX-512 | avx512skx-i32x16 | 16 elements | ✅ Tested |
-| ARM64 + NEON | neon-i32x4 | 4 elements | ✅ Tested |
+| Architecture     | ISPC Target      | Vector Width | Status     
+|------------------|------------------|--------------|------------|
+| x86_64 + SSE4    | sse4-i32x4       | 4 elements   | ✅ Tested  
+| x86_64 + AVX     | avx1-i32x8       | 8 elements   | ✅ Tested 
+| x86_64 + AVX2    | avx2-i32x8       | 8 elements   | ✅ Tested 
+| x86_64 + AVX-512 | avx512skx-i32x16 | 16 elements  | ✅ Tested 
+| ARM64 + NEON     | neon-i32x4       | 4 elements   | ✅ Tested 
 
 ### Memory Layout Optimization
 

@@ -1,4 +1,4 @@
-# Formal Verification Strategy for ZigPulse v3
+# Formal Verification Strategy for beat.zig
 
 ## Overview
 

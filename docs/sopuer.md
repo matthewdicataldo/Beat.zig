@@ -1,4 +1,4 @@
-# Souper Superoptimization Integration for Beat.zig
+# beat.zig souper
 
 This document describes the comprehensive Souper superoptimization integration added to Beat.zig for formal verification and discovery of additional optimizations in performance-critical algorithms.
 

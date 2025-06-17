@@ -8,30 +8,30 @@ ZigPulse v3 is a high-performance parallelism library for Zig that combines trad
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
-│                        Application Layer                        │
-│                    (User Tasks and Workloads)                   │
+│                        Application Layer                       │
+│                    (User Tasks and Workloads)                  │
 └────────────────────────────────────────────────────────────────┘
                                  │
 ┌────────────────────────────────────────────────────────────────┐
-│                         ZigPulse Core                           │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐    │
-│  │  ThreadPool  │  │   Scheduler  │  │  Memory Manager    │    │
-│  │              │  │              │  │                    │    │
-│  │ • Workers    │  │ • Heartbeat  │  │ • Lock-free pools  │    │
-│  │ • Queues     │  │ • Predictive │  │ • NUMA-aware       │    │
-│  │ • Statistics │  │ • Token mgmt │  │ • Cache-aligned    │    │
-│  └─────────────┘  └──────────────┘  └────────────────────┘    │
+│                         ZigPulse Core                          │
+│  ┌─────────────┐  ┌───────────────┐  ┌────────────────────┐    │
+│  │  ThreadPool │  │   Scheduler   │  │  Memory Manager    │    │
+│  │             │  │               │  │                    │    │
+│  │ • Workers   │  │ • Heartbeat   │  │ • Lock-free pools  │    │
+│  │ • Queues    │  │ • Predictive  │  │ • NUMA-aware       │    │
+│  │ • Statistics│  │ • Token mgmt  │  │ • Cache-aligned    │    │
+│  └─────────────┘  └───────────────┘  └────────────────────┘    │
 └────────────────────────────────────────────────────────────────┘
                                  │
 ┌────────────────────────────────────────────────────────────────┐
-│                      Hardware Abstraction                       │
-│  ┌─────────────┐  ┌──────────────┐  ┌────────────────────┐    │
+│                      Hardware Abstraction                      │
+│  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐    │
 │  │   Topology   │  │  Lock-Free   │  │    Platform        │    │
 │  │              │  │              │  │                    │    │
 │  │ • CPU detect │  │ • WS Deque   │  │ • Thread affinity  │    │
 │  │ • Cache info │  │ • MPMC Queue │  │ • Memory binding   │    │
 │  │ • NUMA nodes │  │ • Atomics    │  │ • OS abstractions  │    │
-│  └─────────────┘  └──────────────┘  └────────────────────┘    │
+│  └──────────────┘  └──────────────┘  └────────────────────┘    │
 └────────────────────────────────────────────────────────────────┘
 ```
 
@@ -110,11 +110,6 @@ Task scheduling intelligence.
    - 100μs interval by default
    - Token-based promotion
    - Work/overhead ratio tracking
-
-2. **Predictive Scheduling** (TODO)
-   - Task fingerprinting
-   - Execution time prediction
-   - Confidence-based decisions
 
 ### PCAll Module (`src/pcall.zig`)
 Potentially parallel function calls.
@@ -280,54 +275,3 @@ pub const PlatformVTable = struct {
     getCurrentCpu: *const fn () u32,
 };
 ```
-
-## Testing Architecture
-
-### Unit Tests
-- Per-module test suites
-- Mock implementations for isolation
-- Property-based testing for algorithms
-
-### Integration Tests
-- Multi-threaded scenarios
-- Stress testing under load
-- Platform-specific validation
-
-### Performance Tests
-- Microbenchmarks for primitives
-- Macrobenchmarks for patterns
-- Regression detection
-
-## Future Architecture Evolution
-
-### Near Term
-1. **Predictive Scheduling with 1€ Filter**
-   - Adaptive execution time prediction
-   - Better than EMA for variable workloads
-   - See [PREDICTIVE_SCHEDULING_ANALYSIS.md](PREDICTIVE_SCHEDULING_ANALYSIS.md)
-
-2. **GPU Integration**
-   - Unified task abstraction
-   - Transparent offloading
-   - Memory coherence
-
-3. **Distributed Support**
-   - Network-transparent queues
-   - Remote work stealing
-   - Fault tolerance
-
-### Long Term
-1. **Formal Verification**
-   - LLM-assisted proof development
-   - Mathematical correctness guarantees
-   - See [FORMAL_VERIFICATION.md](FORMAL_VERIFICATION.md)
-
-2. **AI-Driven Scheduling**
-   - Online learning
-   - Pattern recognition
-   - Automatic tuning
-
-3. **Quantum Integration**
-   - Hybrid algorithms
-   - Quantum task types
-   - Coherence management
