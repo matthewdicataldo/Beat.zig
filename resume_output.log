@@ -1,43 +1,0 @@
-[2025-06-16 02:27:26] Resuming setup from checkpoints...
-[2025-06-16 02:27:26] Starting robust Souper setup...
-[2025-06-16 02:27:26] Project root: /mnt/c/Users/matth/Documents/Repos/Beat.zig
-[2025-06-16 02:27:26] Third party dir: /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper
-[2025-06-16 02:27:26] Artifacts dir: /mnt/c/Users/matth/Documents/Repos/Beat.zig/artifacts/souper
-[2025-06-16 02:27:26] Starting: setup_directories
-[2025-06-16 02:27:26] Setting up directory structure...
-[2025-06-16 02:27:26] Installing hiredis dependency...
-[2025-06-16 02:27:26] Note: Skipping system package install (no sudo). Building from source...
-[2025-06-16 02:27:26] Building hiredis from source...
-Cloning into 'hiredis-src'...
-make: Warning: File 'alloc.c' has modification time 0.021 s in the future
-cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -Werror -g -ggdb  -pedantic alloc.c
-cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -Werror -g -ggdb  -pedantic net.c
-cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -Werror -g -ggdb  -pedantic hiredis.c
-cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -Werror -g -ggdb  -pedantic sds.c
-cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -Werror -g -ggdb  -pedantic async.c
-cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -Werror -g -ggdb  -pedantic read.c
-cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -Werror -g -ggdb  -pedantic sockcompat.c
-cc -std=c99 -c -O3 -fPIC   -Wall -Wextra -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -Werror -g -ggdb  -pedantic test.c
-Generating hiredis.pc for pkgconfig...
-cc  -shared -Wl,-soname,libhiredis.so.1.3.0 -o libhiredis.so alloc.o net.o hiredis.o sds.o async.o read.o sockcompat.o 
-ar rcs libhiredis.a alloc.o net.o hiredis.o sds.o async.o read.o sockcompat.o
-cc -o hiredis-test -O3 -fPIC   -Wall -Wextra -Wstrict-prototypes -Wwrite-strings -Wno-missing-field-initializers -Werror -g -ggdb  -pedantic -I. test.o libhiredis.a  
-make: warning:  Clock skew detected.  Your build may be incomplete.
-mkdir -p /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper/hiredis-install/include/hiredis /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper/hiredis-install/include/hiredis/adapters /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper/hiredis-install/lib
-cp -pPR hiredis.h async.h read.h sds.h alloc.h sockcompat.h /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper/hiredis-install/include/hiredis
-cp -pPR adapters/*.h /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper/hiredis-install/include/hiredis/adapters
-cp -pPR libhiredis.so /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper/hiredis-install/lib/libhiredis.so.1.3.0
-cd /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper/hiredis-install/lib && ln -sf libhiredis.so.1.3.0 libhiredis.so && ln -sf libhiredis.so.1.3.0 libhiredis.so.1
-cp -pPR libhiredis.a /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper/hiredis-install/lib
-mkdir -p /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper/hiredis-install/lib/pkgconfig
-cp -pPR hiredis.pc /mnt/c/Users/matth/Documents/Repos/Beat.zig/third_party/souper/hiredis-install/lib/pkgconfig
-[2025-06-16 02:27:30] Checkpoint created: setup_directories
-[2025-06-16 02:27:30] Starting: clone_repositories
-[2025-06-16 02:27:30] Cloning Souper repository...
-Cloning into 'souper-src'...
-Updating files:  24% (204/819)Updating files:  25% (205/819)Updating files:  26% (213/819)Updating files:  27% (222/819)Updating files:  28% (230/819)Updating files:  29% (238/819)Updating files:  30% (246/819)Updating files:  31% (254/819)Updating files:  32% (263/819)Updating files:  33% (271/819)Updating files:  34% (279/819)Updating files:  35% (287/819)Updating files:  36% (295/819)Updating files:  37% (304/819)Updating files:  38% (312/819)Updating files:  39% (320/819)Updating files:  40% (328/819)Updating files:  41% (336/819)Updating files:  42% (344/819)Updating files:  43% (353/819)Updating files:  44% (361/819)Updating files:  45% (369/819)Updating files:  46% (377/819)Updating files:  47% (385/819)Updating files:  48% (394/819)Updating files:  49% (402/819)Updating files:  50% (410/819)Updating files:  51% (418/819)Updating files:  52% (426/819)Updating files:  53% (435/819)Updating files:  54% (443/819)Updating files:  55% (451/819)Updating files:  56% (459/819)Updating files:  57% (467/819)Updating files:  58% (476/819)Updating files:  59% (484/819)Updating files:  60% (492/819)Updating files:  61% (500/819)Updating files:  62% (508/819)Updating files:  63% (516/819)Updating files:  64% (525/819)Updating files:  65% (533/819)Updating files:  66% (541/819)Updating files:  67% (549/819)Updating files:  68% (557/819)Updating files:  69% (566/819)Updating files:  70% (574/819)Updating files:  71% (582/819)Updating files:  72% (590/819)Updating files:  73% (598/819)Updating files:  73% (605/819)Updating files:  74% (607/819)Updating files:  75% (615/819)Updating files:  76% (623/819)Updating files:  77% (631/819)Updating files:  78% (639/819)Updating files:  79% (648/819)Updating files:  80% (656/819)Updating files:  81% (664/819)Updating files:  82% (672/819)Updating files:  83% (680/819)Updating files:  84% (688/819)Updating files:  85% (697/819)Updating files:  86% (705/819)Updating files:  87% (713/819)Updating files:  88% (721/819)Updating files:  89% (729/819)Updating files:  90% (738/819)Updating files:  91% (746/819)Updating files:  92% (754/819)Updating files:  93% (762/819)Updating files:  94% (770/819)Updating files:  95% (779/819)Updating files:  96% (787/819)Updating files:  97% (795/819)Updating files:  98% (803/819)Updating files:  99% (811/819)Updating files: 100% (819/819)Updating files: 100% (819/819), done.
-[2025-06-16 02:27:39] Initializing submodules...
-[2025-06-16 02:27:40] Checkpoint created: clone_repositories
-[2025-06-16 02:27:40] Starting: build_z3
-[2025-06-16 02:27:40] Building Z3 SMT solver...
-[2025-06-16 02:27:40] ERROR: Z3 source not found in souper submodules
