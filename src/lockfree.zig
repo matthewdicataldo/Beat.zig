@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
+const prefetch = @import("prefetch.zig");
 
 // Lock-free data structures for ZigPulse
 
@@ -91,8 +92,18 @@ pub fn WorkStealingDeque(comptime T: type) type {
                 return error.WorkStealingDequeFull;
             }
             
+            // Prefetch the buffer location we're about to write to
+            // This brings the cache line into cache before the write
+            const buffer_index = b & self.mask;
+            prefetch.prefetch(&self.buffer[buffer_index], .write, .temporal_high);
+            
+            // Prefetch the next few buffer locations for sequential operations
+            if (buffer_index + 1 < self.buffer.len) {
+                prefetch.prefetch(&self.buffer[buffer_index + 1], .write, .temporal_medium);
+            }
+            
             // Store item
-            self.buffer[b & self.mask] = item;
+            self.buffer[buffer_index] = item;
             
             // Increment bottom with release ordering to ensure task is visible
             self.hot_data.bottom.store(b + 1, .release);
@@ -105,6 +116,11 @@ pub fn WorkStealingDeque(comptime T: type) type {
             if (b == 0) return null;
             
             const new_b = b - 1;
+            
+            // Prefetch the item we're about to read
+            const buffer_index = new_b & self.mask;
+            prefetch.prefetch(&self.buffer[buffer_index], .read, .temporal_high);
+            
             self.hot_data.bottom.store(new_b, .seq_cst);
             
             const t = self.hot_data.top.load(.monotonic);
@@ -147,7 +163,16 @@ pub fn WorkStealingDeque(comptime T: type) type {
                 return null;
             }
             
-            const item = self.buffer[t & self.mask];
+            // Prefetch the item we're about to steal
+            const buffer_index = t & self.mask;
+            prefetch.prefetch(&self.buffer[buffer_index], .read, .temporal_high);
+            
+            // Also prefetch the next item in case multiple steals happen
+            if (buffer_index + 1 < self.buffer.len and (t + 1) < b) {
+                prefetch.prefetch(&self.buffer[(t + 1) & self.mask], .read, .temporal_medium);
+            }
+            
+            const item = self.buffer[buffer_index];
             
             // Try to increment top
             if (self.hot_data.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic) == null) {

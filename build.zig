@@ -196,6 +196,20 @@ pub fn build(b: *std.Build) void {
     const cache_alignment_step = b.step("bench-cache-alignment", "Benchmark cache-line alignment optimizations");
     cache_alignment_step.dependOn(&run_cache_alignment_benchmark.step);
     
+    // Memory prefetching benchmark
+    const prefetching_benchmark = b.addExecutable(.{
+        .name = "benchmark_prefetching",
+        .root_source_file = b.path("benchmark_prefetching.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Use ReleaseFast for accurate memory performance measurement
+    });
+    build_config.addBuildOptions(b, prefetching_benchmark, auto_config);
+    prefetching_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    
+    const run_prefetching_benchmark = b.addRunArtifact(prefetching_benchmark);
+    const prefetching_step = b.step("bench-prefetching", "Benchmark memory prefetching optimizations");
+    prefetching_step.dependOn(&run_prefetching_benchmark.step);
+    
     // Bundle file tests
     const bundle_test = b.addTest(.{
         .root_source_file = b.path("zigpulse.zig"),

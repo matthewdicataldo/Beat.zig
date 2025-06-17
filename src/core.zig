@@ -28,6 +28,7 @@ pub const simd_classifier = @import("simd_classifier.zig");
 pub const simd_benchmark = @import("simd_benchmark.zig");
 pub const mathematical_optimizations = @import("mathematical_optimizations.zig");
 pub const souper_integration = @import("souper_integration.zig");
+pub const prefetch = @import("prefetch.zig");
 // TODO: Re-enable A3C module after resolving WSL file system compilation issue
 // pub const a3c = @import("a3c.zig");
 
@@ -1788,6 +1789,9 @@ pub const ThreadPool = struct {
         const is_likely_fast_task = (task_data_size <= 256) and (task.priority == .normal);
         
         if (is_likely_fast_task and self.should_use_fast_path()) {
+            // Prefetch task data before execution to reduce latency
+            prefetch.prefetch(task.data, .read, .temporal_high);
+            
             // Execute immediately with minimal overhead
             task.func(task.data);
             _ = self.stats.hot.fast_path_executions.fetchAdd(1, .monotonic);
@@ -2156,6 +2160,10 @@ pub const ThreadPool = struct {
             
             if (task) |t| {
                 coz.latencyBegin(coz.Points.task_execution);
+                
+                // Prefetch task data before execution for better cache performance
+                prefetch.prefetch(t.data, .read, .temporal_high);
+                
                 t.func(t.data);
                 coz.latencyEnd(coz.Points.task_execution);
                 
@@ -2339,18 +2347,32 @@ pub const ThreadPool = struct {
         for (shuffled_candidates[0..candidates.len]) |victim_id| {
             const victim = &self.workers[victim_id];
             
+            // Prefetch victim's queue data structure for better steal performance
             switch (victim.queue) {
                 .mutex => |*q| {
+                    // Prefetch the queue data structure
+                    prefetch.prefetch(q, .read, .temporal_medium);
+                    
                     if (q.steal()) |task| {
+                        // Prefetch stolen task data
+                        prefetch.prefetch(task.data, .read, .temporal_high);
+                        
                         self.stats.recordSteal();
                         coz.throughput(coz.Points.task_stolen);
                         return task;
                     }
                 },
                 .lockfree => |*q| {
+                    // Prefetch the deque's hot data (atomic indices)
+                    prefetch.prefetch(&q.hot_data, .read, .temporal_high);
+                    
                     if (q.steal()) |task_ptr| {
                         self.stats.recordSteal();
                         coz.throughput(coz.Points.task_stolen);
+                        
+                        // Prefetch task data before accessing it
+                        prefetch.prefetch(task_ptr, .read, .temporal_high);
+                        
                         // Get task value and potentially free the allocation
                         const task = task_ptr.*;
                         if (self.memory_pool) |mem_pool| {
