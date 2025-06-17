@@ -1,5 +1,11 @@
 - off the beaten path
+    - https://www.youtube.com/watch?v=41-zBbMAUHA
 - intro to parallelism / fork/join / hearbeat scheduling
+    - https://en.wikipedia.org/wiki/Parallel_computing
+    - https://en.wikipedia.org/wiki/Amdahl%27s_law
+    - https://github.com/judofyr/spice/blob/main/README.md
+    - https://www.andrew.cmu.edu/user/mrainey/heartbeat/heartbeat.html
+    - https://en.wikipedia.org/wiki/Fork%E2%80%93join_model
 - one euro filter
 - simd w/ zig + ispc
 - zig + souper + minotaur

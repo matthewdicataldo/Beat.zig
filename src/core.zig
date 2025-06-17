@@ -30,6 +30,8 @@ pub const mathematical_optimizations = @import("mathematical_optimizations.zig")
 pub const souper_integration = @import("souper_integration.zig");
 pub const continuation = @import("continuation.zig");
 pub const continuation_simd = @import("continuation_simd.zig");
+pub const continuation_predictive = @import("continuation_predictive.zig");
+pub const continuation_worker_selection = @import("continuation_worker_selection.zig");
 
 // Version info
 pub const version = std.SemanticVersion{
@@ -366,6 +368,12 @@ pub const ThreadPool = struct {
     // SIMD-enhanced continuation processing (Phase 1 integration)
     continuation_simd_classifier: ?*continuation_simd.ContinuationClassifier = null,
     
+    // Predictive accounting for intelligent execution time prediction (Phase 1 integration)
+    continuation_predictive_accounting: ?*continuation_predictive.ContinuationPredictiveAccounting = null,
+    
+    // Advanced worker selection for continuations (Phase 1 integration)
+    continuation_worker_selector: ?*continuation_worker_selection.ContinuationWorkerSelector = null,
+    
     const Self = @This();
     
     const Worker = struct {
@@ -585,6 +593,35 @@ pub const ThreadPool = struct {
         self.continuation_simd_classifier.?.* = try continuation_simd.ContinuationClassifier.init(allocator);
         std.log.info("🚀 SIMD-enhanced continuation processing enabled - 6-23x performance improvement", .{});
         
+        // Initialize predictive accounting for intelligent execution time prediction
+        // Integrates One Euro Filter for adaptive prediction with SIMD analysis
+        if (actual_config.enable_predictive) {
+            const predictive_config = continuation_predictive.PredictiveConfig{
+                .min_cutoff = actual_config.prediction_min_cutoff,
+                .beta = actual_config.prediction_beta,
+                .d_cutoff = actual_config.prediction_d_cutoff,
+                .enable_adaptive_numa = actual_config.enable_numa_aware,
+            };
+            
+            self.continuation_predictive_accounting = try allocator.create(continuation_predictive.ContinuationPredictiveAccounting);
+            self.continuation_predictive_accounting.?.* = try continuation_predictive.ContinuationPredictiveAccounting.init(allocator, predictive_config);
+            std.log.info("🧠 Continuation predictive accounting enabled - intelligent execution time prediction with One Euro Filter", .{});
+        }
+        
+        // Initialize advanced worker selection for continuations (Phase 1 integration)
+        // Provides intelligent worker selection with multi-criteria optimization
+        if (self.advanced_selector) |advanced_sel| {
+            const selection_criteria = actual_config.selection_criteria orelse advanced_worker_selection.SelectionCriteria.balanced();
+            
+            self.continuation_worker_selector = try allocator.create(continuation_worker_selection.ContinuationWorkerSelector);
+            self.continuation_worker_selector.?.* = try continuation_worker_selection.ContinuationWorkerSelector.init(
+                allocator, 
+                advanced_sel, 
+                selection_criteria
+            );
+            std.log.info("🎯 Advanced continuation worker selection enabled - multi-criteria optimization", .{});
+        }
+        
         // Initialize workers
         for (self.workers, 0..) |*worker, i| {
             const cpu_id = if (self.topology) |topo| @as(u32, @intCast(i % topo.total_cores)) else null;
@@ -675,6 +712,16 @@ pub const ThreadPool = struct {
             self.allocator.destroy(classifier);
         }
         
+        if (self.continuation_predictive_accounting) |predictor| {
+            predictor.deinit();
+            self.allocator.destroy(predictor);
+        }
+        
+        if (self.continuation_worker_selector) |selector| {
+            selector.deinit();
+            self.allocator.destroy(selector);
+        }
+        
         self.allocator.free(self.workers);
         self.allocator.destroy(self);
     }
@@ -735,15 +782,16 @@ pub const ThreadPool = struct {
         _ = self.stats.hot.tasks_submitted.fetchAdd(1, .monotonic);
         
         // SIMD-enhanced continuation classification (6-23x performance improvement)
+        var simd_class: ?continuation_simd.ContinuationSIMDClass = null;
         if (self.continuation_simd_classifier) |classifier| {
             // Classify continuation for SIMD suitability
-            const simd_class = try classifier.classifyContinuation(cont);
+            simd_class = try classifier.classifyContinuation(cont);
             
             // Store classification in continuation for worker optimization
-            cont.fingerprint_hash = @intFromFloat(simd_class.simd_suitability_score * 1000000); // Store as hash
+            cont.fingerprint_hash = @intFromFloat(simd_class.?.simd_suitability_score * 1000000); // Store as hash
             
             // Add to batch formation if suitable for SIMD
-            if (simd_class.isSIMDSuitable()) {
+            if (simd_class.?.isSIMDSuitable()) {
                 try classifier.addContinuationForBatching(cont);
                 
                 // If we have enough continuations, try to form batches
@@ -755,6 +803,24 @@ pub const ThreadPool = struct {
             }
         }
         
+        // Intelligent execution time prediction with One Euro Filter
+        var prediction: ?continuation_predictive.PredictionResult = null;
+        if (self.continuation_predictive_accounting) |predictor| {
+            // Predict execution time using SIMD classification for enhanced accuracy
+            prediction = try predictor.predictExecutionTime(cont, simd_class);
+            
+            // Store prediction for adaptive NUMA placement
+            if (prediction.?.numa_preference) |numa_node| {
+                cont.numa_node = numa_node;
+            }
+            
+            // Adjust scheduling based on prediction confidence and execution time
+            if (prediction.?.confidence > 0.7 and prediction.?.predicted_time_ns > 5_000_000) { // > 5ms
+                // For high-confidence long-running continuations, prefer specific NUMA placement
+                cont.locality_score = @min(1.0, cont.locality_score + prediction.?.confidence * 0.2);
+            }
+        }
+        
         // Initialize NUMA locality for continuation
         if (self.topology) |topo| {
             // Use round-robin NUMA node assignment for load balancing
@@ -763,9 +829,22 @@ pub const ThreadPool = struct {
             cont.initNumaLocality(numa_node, socket_id);
         }
         
-        // Round-robin worker selection for continuation submission
-        const submission_count = self.stats.hot.tasks_submitted.load(.monotonic);
-        const worker_id = submission_count % self.workers.len;
+        // Advanced worker selection for continuation submission
+        var worker_id: u32 = 0;
+        
+        // Use advanced worker selection if available, otherwise fall back to round-robin
+        if (self.continuation_worker_selector) |selector| {
+            worker_id = selector.selectWorkerForContinuation(cont, self, simd_class, prediction) catch blk: {
+                // Fallback to round-robin on error
+                const submission_count = self.stats.hot.tasks_submitted.load(.monotonic);
+                break :blk @intCast(submission_count % self.workers.len);
+            };
+        } else {
+            // Simple round-robin fallback
+            const submission_count = self.stats.hot.tasks_submitted.load(.monotonic);
+            worker_id = @intCast(submission_count % self.workers.len);
+        }
+        
         const worker = &self.workers[worker_id];
         
         // Register with worker's local continuation registry
@@ -778,6 +857,16 @@ pub const ThreadPool = struct {
         switch (worker.queue) {
             .mutex => |*q| try q.pushContinuation(cont),
             .lockfree => |*q| try q.pushBottom(work_item),
+        }
+    }
+    
+    /// Handle continuation completion and update predictive accounting
+    pub fn handleContinuationCompletion(self: *Self, cont: *continuation.Continuation, actual_execution_time_ns: u64) void {
+        if (self.continuation_predictive_accounting) |predictor| {
+            predictor.updatePrediction(cont, actual_execution_time_ns) catch |err| {
+                // Log error but don't fail the continuation completion
+                std.log.warn("Failed to update continuation prediction: {}", .{err});
+            };
         }
     }
     

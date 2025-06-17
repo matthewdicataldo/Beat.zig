@@ -581,6 +581,32 @@ pub fn build(b: *std.Build) void {
     const simd_continuation_test_step = b.step("test-simd-continuation", "Test SIMD-enhanced continuation processing with 6-23x performance improvement");
     simd_continuation_test_step.dependOn(&run_simd_continuation_test.step);
     
+    // Predictive accounting integration test (Phase 1 integration)
+    const predictive_continuation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_predictive_simple.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    predictive_continuation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, predictive_continuation_test, auto_config);
+    
+    const run_predictive_continuation_test = b.addRunArtifact(predictive_continuation_test);
+    const predictive_continuation_test_step = b.step("test-predictive-continuation", "Test predictive accounting integration with One Euro Filter and adaptive NUMA placement");
+    predictive_continuation_test_step.dependOn(&run_predictive_continuation_test.step);
+    
+    // Advanced worker selection integration test (Phase 1 integration)
+    const worker_selection_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_worker_selection.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    worker_selection_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, worker_selection_test, auto_config);
+    
+    const run_worker_selection_test = b.addRunArtifact(worker_selection_test);
+    const worker_selection_test_step = b.step("test-worker-selection", "Test advanced worker selection integration with multi-criteria optimization");
+    worker_selection_test_step.dependOn(&run_worker_selection_test.step);
+    
     // ML-based classification integration test (Task 3.2.2)
     const ml_integration_test = b.addTest(.{
         .root_source_file = b.path("test_ml_integration.zig"),
