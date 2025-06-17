@@ -1,4 +1,5 @@
 TEMP
+.claude
 
 # Build artifacts
 *.o
@@ -31,6 +32,9 @@ benchmark
 examples
 demo
 
+# Optimization artifacts directory structure
+/artifacts/
+
 # Souper superoptimization artifacts
 *.ll
 *.bc
@@ -42,6 +46,26 @@ beat_souper_*
 /third_party/souper/third_party/
 nohup.out
 
+# Minotaur SIMD superoptimization artifacts
+minotaur_*.log
+minotaur_*.txt
+minotaur_*.pid
+minotaur_env.sh
+beat_minotaur_*
+/third_party/minotaur/
+/third_party/alive2-intrinsics/
+
+# ISPC (Intel SPMD Program Compiler) artifacts
+*.ispc.h
+*.ispc.o
+*.ispc_*
+/zig-cache/ispc/
+ispc_*.log
+
+# Triple-optimization (Souper + Minotaur + ISPC) artifacts
+triple_optimization_*.log
+combined_optimization_*.log
+
 # LLVM artifacts
 llvm-*.log
 *.ninja_deps
@@ -51,3 +75,7 @@ llvm-*.log
 /tmp/
 *.tmp
 *.temp
+
+# Redis cache files (used by optimization frameworks)
+dump.rdb
+redis.log
