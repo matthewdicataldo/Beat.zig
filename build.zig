@@ -542,6 +542,19 @@ pub fn build(b: *std.Build) void {
     const continuation_stealing_test_step = b.step("test-continuation-stealing", "Test continuation stealing implementation");
     continuation_stealing_test_step.dependOn(&run_continuation_stealing_test.step);
     
+    // ThreadPool continuation integration test (Task 7.1)
+    const threadpool_continuation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_threadpool_continuation_integration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    threadpool_continuation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, threadpool_continuation_test, auto_config);
+    
+    const run_threadpool_continuation_test = b.addRunArtifact(threadpool_continuation_test);
+    const threadpool_continuation_test_step = b.step("test-threadpool-continuation", "Test ThreadPool integration with continuation stealing");
+    threadpool_continuation_test_step.dependOn(&run_threadpool_continuation_test.step);
+    
     // ML-based classification integration test (Task 3.2.2)
     const ml_integration_test = b.addTest(.{
         .root_source_file = b.path("test_ml_integration.zig"),

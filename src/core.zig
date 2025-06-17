@@ -369,45 +369,62 @@ pub const ThreadPool = struct {
         thread: std.Thread,
         pool: *ThreadPool,
         
-        // Queues based on configuration
+        // Queues based on configuration - now support both tasks and continuations
         queue: union(enum) {
             mutex: MutexQueue,
-            lockfree: lockfree.WorkStealingDeque(*Task),
+            lockfree: lockfree.WorkStealingDeque(lockfree.WorkItem),
         },
         
         // CPU affinity (v3)
         cpu_id: ?u32 = null,
         numa_node: ?u32 = null,
+        
+        // Continuation support
+        continuation_registry: ?*continuation.ContinuationRegistry = null,
     };
     
     const MutexQueue = struct {
-        tasks: [3]std.ArrayList(Task), // One per priority
+        work_items: [3]std.ArrayList(lockfree.WorkItem), // One per priority
         mutex: std.Thread.Mutex,
         
         pub fn init(allocator: std.mem.Allocator) MutexQueue {
             return .{
-                .tasks = .{
-                    std.ArrayList(Task).init(allocator),
-                    std.ArrayList(Task).init(allocator),
-                    std.ArrayList(Task).init(allocator),
+                .work_items = .{
+                    std.ArrayList(lockfree.WorkItem).init(allocator),
+                    std.ArrayList(lockfree.WorkItem).init(allocator),
+                    std.ArrayList(lockfree.WorkItem).init(allocator),
                 },
                 .mutex = .{},
             };
         }
         
         pub fn deinit(self: *MutexQueue) void {
-            for (&self.tasks) |*queue| {
+            for (&self.work_items) |*queue| {
                 queue.deinit();
             }
         }
         
-        pub fn push(self: *MutexQueue, task: Task) !void {
+        // Push a task as WorkItem
+        pub fn pushTask(self: *MutexQueue, task: Task) !void {
+            // For mutex queue, we need to store the task somewhere permanent
+            // We'll use a simple approach and store a copy
+            const work_item = lockfree.WorkItem.fromTask(@constCast(@ptrCast(&task)));
             self.mutex.lock();
             defer self.mutex.unlock();
-            try self.tasks[@intFromEnum(task.priority)].append(task);
+            try self.work_items[@intFromEnum(task.priority)].append(work_item);
         }
         
-        pub fn pop(self: *MutexQueue) ?Task {
+        // Push a continuation as WorkItem  
+        pub fn pushContinuation(self: *MutexQueue, cont: *continuation.Continuation) !void {
+            const work_item = lockfree.WorkItem.fromContinuation(cont);
+            // Continuations have dynamic priority
+            const priority_index = if (cont.getPriority() > 2000) @as(usize, 0) else if (cont.getPriority() > 1000) @as(usize, 1) else @as(usize, 2);
+            self.mutex.lock();
+            defer self.mutex.unlock();
+            try self.work_items[priority_index].append(work_item);
+        }
+        
+        pub fn pop(self: *MutexQueue) ?lockfree.WorkItem {
             self.mutex.lock();
             defer self.mutex.unlock();
             
@@ -415,14 +432,14 @@ pub const ThreadPool = struct {
             var i: i32 = 2;
             while (i >= 0) : (i -= 1) {
                 const idx = @as(usize, @intCast(i));
-                if (self.tasks[idx].items.len > 0) {
-                    return self.tasks[idx].pop();
+                if (self.work_items[idx].items.len > 0) {
+                    return self.work_items[idx].pop();
                 }
             }
             return null;
         }
         
-        pub fn steal(self: *MutexQueue) ?Task {
+        pub fn steal(self: *MutexQueue) ?lockfree.WorkItem {
             return self.pop(); // Simple for mutex version
         }
     };
@@ -602,6 +619,12 @@ pub const ThreadPool = struct {
                 .mutex => |*q| q.deinit(),
                 .lockfree => |*q| q.deinit(),
             }
+            
+            // Clean up continuation registry if it exists
+            if (worker.continuation_registry) |registry| {
+                registry.deinit();
+                self.allocator.destroy(registry);
+            }
         }
         
         // Cleanup subsystems
@@ -670,17 +693,51 @@ pub const ThreadPool = struct {
         const worker = &self.workers[worker_id];
         
         switch (worker.queue) {
-            .mutex => |*q| try q.push(task),
+            .mutex => |*q| try q.pushTask(task),
             .lockfree => |*q| {
-                // OPTIMIZED: Pre-allocate task pointer to avoid malloc overhead
+                // Create task pointer and wrap in WorkItem
                 const task_ptr = if (self.memory_pool) |pool|
                     try pool.alloc()
                 else
                     try self.allocator.create(Task);
                 
                 task_ptr.* = task;
-                try q.pushBottom(task_ptr);
+                const work_item = lockfree.WorkItem.fromTask(task_ptr);
+                try q.pushBottom(work_item);
             },
+        }
+    }
+    
+    /// Submit a continuation for execution with work stealing support
+    pub fn submitContinuation(self: *Self, cont: *continuation.Continuation) !void {
+        // Update statistics
+        _ = self.stats.hot.tasks_submitted.fetchAdd(1, .monotonic);
+        
+        // Register with global continuation registry if predictive features enabled
+        if (self.fingerprint_registry != null) {
+            // Set NUMA affinity hint based on current context
+            if (self.topology) |topo| {
+                // Use round-robin NUMA node assignment for load balancing
+                const numa_node = @as(u32, @intCast(self.stats.hot.tasks_submitted.load(.monotonic) % topo.numa_nodes.len));
+                cont.numa_node = numa_node;
+            }
+        }
+        
+        // Round-robin worker selection for continuation submission
+        const submission_count = self.stats.hot.tasks_submitted.load(.monotonic);
+        const worker_id = submission_count % self.workers.len;
+        const worker = &self.workers[worker_id];
+        
+        // Register with worker's local continuation registry
+        if (worker.continuation_registry) |registry| {
+            try registry.registerContinuation(cont);
+        }
+        
+        // Submit as WorkItem
+        const work_item = lockfree.WorkItem.fromContinuation(cont);
+        switch (worker.queue) {
+            .mutex => |*q| try q.pushContinuation(cont),
+            .lockfree => |*q| try q.pushBottom(work_item),
         }
     }
     
@@ -693,9 +750,9 @@ pub const ThreadPool = struct {
                     .mutex => |*q| blk: {
                         q.mutex.lock();
                         defer q.mutex.unlock();
-                        break :blk q.tasks[0].items.len == 0 and 
-                                   q.tasks[1].items.len == 0 and 
-                                   q.tasks[2].items.len == 0;
+                        break :blk q.work_items[0].items.len == 0 and 
+                                   q.work_items[1].items.len == 0 and 
+                                   q.work_items[2].items.len == 0;
                     },
                     .lockfree => |*q| q.isEmpty(),
                 };
@@ -728,7 +785,7 @@ pub const ThreadPool = struct {
                 .mutex => |*q| blk: {
                     q.mutex.lock();
                     defer q.mutex.unlock();
-                    break :blk (q.tasks[0].items.len + q.tasks[1].items.len + q.tasks[2].items.len) < 2;
+                    break :blk (q.work_items[0].items.len + q.work_items[1].items.len + q.work_items[2].items.len) < 2;
                 },
                 .lockfree => |*q| q.size() < 2,
             };
@@ -929,7 +986,7 @@ pub const ThreadPool = struct {
             .mutex => |*q| blk: {
                 q.mutex.lock();
                 defer q.mutex.unlock();
-                break :blk q.tasks[0].items.len + q.tasks[1].items.len + q.tasks[2].items.len;
+                break :blk q.work_items[0].items.len + q.work_items[1].items.len + q.work_items[2].items.len;
             },
             .lockfree => |*q| q.size(),
         };
@@ -943,16 +1000,24 @@ pub const ThreadPool = struct {
     };
     
     fn initWorker(worker: *Worker, allocator: std.mem.Allocator, config: *const Config, worker_config: WorkerConfig) !void {
+        // Initialize continuation registry if predictive features are enabled
+        var cont_registry: ?*continuation.ContinuationRegistry = null;
+        if (config.enable_predictive) {
+            cont_registry = try allocator.create(continuation.ContinuationRegistry);
+            cont_registry.?.* = continuation.ContinuationRegistry.init(allocator);
+        }
+        
         worker.* = .{
             .id = worker_config.id,
             .thread = undefined,
             .pool = worker_config.pool,
             .queue = if (config.enable_lock_free)
-                .{ .lockfree = try lockfree.WorkStealingDeque(*Task).init(allocator, config.task_queue_size) }
+                .{ .lockfree = try lockfree.WorkStealingDeque(lockfree.WorkItem).init(allocator, config.task_queue_size) }
             else
                 .{ .mutex = MutexQueue.init(allocator) },
             .cpu_id = worker_config.cpu_id,
             .numa_node = worker_config.numa_node,
+            .continuation_registry = cont_registry,
         };
     }
     
@@ -963,12 +1028,31 @@ pub const ThreadPool = struct {
         }
         
         while (worker.pool.running.load(.acquire)) {
-            // Try to get work
-            const task = getWork(worker);
+            // Try to get work (tasks or continuations)
+            const work_item = getWork(worker);
             
-            if (task) |t| {
+            if (work_item) |item| {
                 coz.latencyBegin(coz.Points.task_execution);
-                t.func(t.data);
+                
+                // Execute work item based on type
+                switch (item) {
+                    .task => |task| {
+                        // Execute traditional task
+                        const task_ptr = @as(*Task, @ptrCast(@alignCast(task)));
+                        task_ptr.func(task_ptr.data);
+                    },
+                    .continuation => |cont| {
+                        // Execute continuation with stealing support
+                        cont.markRunning(worker.id);
+                        cont.execute();
+                        
+                        // Register completion with continuation registry if available
+                        if (worker.continuation_registry) |registry| {
+                            registry.completeContinuation(cont) catch {};
+                        }
+                    },
+                }
+                
                 coz.latencyEnd(coz.Points.task_execution);
                 
                 worker.pool.stats.recordComplete();
@@ -983,20 +1067,15 @@ pub const ThreadPool = struct {
         }
     }
     
-    fn getWork(worker: *Worker) ?Task {
+    fn getWork(worker: *Worker) ?lockfree.WorkItem {
         // First try local queue
         switch (worker.queue) {
             .mutex => |*q| {
-                if (q.pop()) |task| return task;
+                if (q.pop()) |work_item| return work_item;
             },
             .lockfree => |*q| {
-                if (q.popBottom()) |task_ptr| {
-                    // Get task value and potentially free the allocation
-                    const task = task_ptr.*;
-                    if (worker.pool.memory_pool) |pool| {
-                        pool.free(task_ptr);
-                    }
-                    return task;
+                if (q.popBottom()) |work_item| {
+                    return work_item;
                 }
             },
         }
@@ -1009,7 +1088,7 @@ pub const ThreadPool = struct {
         return null;
     }
     
-    fn stealWork(worker: *Worker) ?Task {
+    fn stealWork(worker: *Worker) ?lockfree.WorkItem {
         const pool = worker.pool;
         
         coz.latencyBegin(coz.Points.queue_steal);
@@ -1023,7 +1102,7 @@ pub const ThreadPool = struct {
         }
     }
     
-    fn stealWorkTopologyAware(self: *Self, worker: *Worker, topo: topology.CpuTopology) ?Task {
+    fn stealWorkTopologyAware(self: *Self, worker: *Worker, topo: topology.CpuTopology) ?lockfree.WorkItem {
         const worker_numa = worker.numa_node orelse 0;
         
         // Try stealing in order of preference:
@@ -1049,7 +1128,7 @@ pub const ThreadPool = struct {
         return null;
     }
     
-    fn tryStealFromNumaNode(self: *Self, worker: *Worker, numa_node: u32) ?Task {
+    fn tryStealFromNumaNode(self: *Self, worker: *Worker, numa_node: u32) ?lockfree.WorkItem {
         // Create a list of candidate workers on the same NUMA node
         var candidates: [16]usize = undefined; // Support up to 16 workers per NUMA node
         var candidate_count: usize = 0;
@@ -1064,13 +1143,13 @@ pub const ThreadPool = struct {
         
         // Try candidates in random order to avoid contention patterns
         if (candidate_count > 0) {
-            return self.tryStealFromCandidates(candidates[0..candidate_count]);
+            return self.tryStealFromCandidates(worker, candidates[0..candidate_count]);
         }
         
         return null;
     }
     
-    fn tryStealFromSocket(self: *Self, worker: *Worker, topo: topology.CpuTopology, worker_numa: u32) ?Task {
+    fn tryStealFromSocket(self: *Self, worker: *Worker, topo: topology.CpuTopology, worker_numa: u32) ?lockfree.WorkItem {
         // Find our socket ID through CPU topology
         const worker_socket = blk: {
             if (worker.cpu_id) |cpu_id| {
@@ -1105,13 +1184,13 @@ pub const ThreadPool = struct {
         }
         
         if (candidate_count > 0) {
-            return self.tryStealFromCandidates(candidates[0..candidate_count]);
+            return self.tryStealFromCandidates(worker, candidates[0..candidate_count]);
         }
         
         return null;
     }
     
-    fn tryStealFromRemoteNodes(self: *Self, worker: *Worker, worker_numa: u32) ?Task {
+    fn tryStealFromRemoteNodes(self: *Self, worker: *Worker, worker_numa: u32) ?lockfree.WorkItem {
         var candidates: [16]usize = undefined;
         var candidate_count: usize = 0;
         
@@ -1126,13 +1205,13 @@ pub const ThreadPool = struct {
         }
         
         if (candidate_count > 0) {
-            return self.tryStealFromCandidates(candidates[0..candidate_count]);
+            return self.tryStealFromCandidates(worker, candidates[0..candidate_count]);
         }
         
         return null;
     }
     
-    fn tryStealFromCandidates(self: *Self, candidates: []const usize) ?Task {
+    fn tryStealFromCandidates(self: *Self, worker: *Worker, candidates: []const usize) ?lockfree.WorkItem {
         // Shuffle candidates to avoid contention patterns
         var shuffled_candidates: [16]usize = undefined;
         @memcpy(shuffled_candidates[0..candidates.len], candidates);
@@ -1153,22 +1232,21 @@ pub const ThreadPool = struct {
             
             switch (victim.queue) {
                 .mutex => |*q| {
-                    if (q.steal()) |task| {
+                    if (q.steal()) |work_item| {
                         self.stats.recordSteal();
                         coz.throughput(coz.Points.task_stolen);
-                        return task;
+                        // Mark as stolen if it's a continuation
+                        work_item.markStolen(worker.id);
+                        return work_item;
                     }
                 },
                 .lockfree => |*q| {
-                    if (q.steal()) |task_ptr| {
+                    if (q.steal()) |work_item| {
                         self.stats.recordSteal();
                         coz.throughput(coz.Points.task_stolen);
-                        // Get task value and potentially free the allocation
-                        const task = task_ptr.*;
-                        if (self.memory_pool) |mem_pool| {
-                            mem_pool.free(task_ptr);
-                        }
-                        return task;
+                        // Mark as stolen if it's a continuation
+                        work_item.markStolen(worker.id);
+                        return work_item;
                     }
                 },
             }
@@ -1177,7 +1255,7 @@ pub const ThreadPool = struct {
         return null;
     }
     
-    fn stealWorkRandom(self: *Self, worker: *Worker) ?Task {
+    fn stealWorkRandom(self: *Self, worker: *Worker) ?lockfree.WorkItem {
         // Fallback to random stealing when topology is not available
         const victim_id = std.crypto.random.uintLessThan(usize, self.workers.len);
         if (victim_id == worker.id) return null;
@@ -1186,22 +1264,21 @@ pub const ThreadPool = struct {
         
         switch (victim.queue) {
             .mutex => |*q| {
-                if (q.steal()) |task| {
+                if (q.steal()) |work_item| {
                     self.stats.recordSteal();
                     coz.throughput(coz.Points.task_stolen);
-                    return task;
+                    // Mark as stolen if it's a continuation
+                    work_item.markStolen(worker.id);
+                    return work_item;
                 }
             },
             .lockfree => |*q| {
-                if (q.steal()) |task_ptr| {
+                if (q.steal()) |work_item| {
                     self.stats.recordSteal();
                     coz.throughput(coz.Points.task_stolen);
-                    // Get task value and potentially free the allocation
-                    const task = task_ptr.*;
-                    if (self.memory_pool) |mem_pool| {
-                        mem_pool.free(task_ptr);
-                    }
-                    return task;
+                    // Mark as stolen if it's a continuation
+                    work_item.markStolen(worker.id);
+                    return work_item;
                 }
             },
         }
