@@ -182,6 +182,20 @@ pub fn build(b: *std.Build) void {
     const coz_intensive_step = b.step("coz-intensive", "Run intensive COZ profiling benchmark");
     coz_intensive_step.dependOn(&run_coz_intensive.step);
     
+    // Cache-line alignment benchmark
+    const cache_alignment_benchmark = b.addExecutable(.{
+        .name = "benchmark_cache_alignment",
+        .root_source_file = b.path("benchmark_cache_alignment.zig"),
+        .target = target,
+        .optimize = .ReleaseFast, // Use ReleaseFast for accurate performance measurement
+    });
+    build_config.addBuildOptions(b, cache_alignment_benchmark, auto_config);
+    cache_alignment_benchmark.root_module.addImport("zigpulse", zigpulse_module);
+    
+    const run_cache_alignment_benchmark = b.addRunArtifact(cache_alignment_benchmark);
+    const cache_alignment_step = b.step("bench-cache-alignment", "Benchmark cache-line alignment optimizations");
+    cache_alignment_step.dependOn(&run_cache_alignment_benchmark.step);
+    
     // Bundle file tests
     const bundle_test = b.addTest(.{
         .root_source_file = b.path("zigpulse.zig"),

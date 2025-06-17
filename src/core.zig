@@ -1481,19 +1481,23 @@ pub const ThreadPool = struct {
     const Self = @This();
     
     const Worker = struct {
-        id: u32,
-        thread: std.Thread,
-        pool: *ThreadPool,
-        
-        // Queues based on configuration
+        // HOT PATH: Frequently accessed during task execution (first cache line)
         queue: union(enum) {
             mutex: MutexQueue,
             lockfree: lockfree.WorkStealingDeque(*Task),
         },
         
-        // CPU affinity (v3)
+        // WARM PATH: Moderately accessed during scheduling
+        pool: *ThreadPool,
+        
+        // COLD PATH: Rarely accessed metadata (separate cache line)
+        id: u32,
+        thread: std.Thread,
         cpu_id: ?u32 = null,
         numa_node: ?u32 = null,
+        
+        // Cache line padding to prevent false sharing with next worker
+        _cache_pad: [64]u8 = [_]u8{0} ** 64,
         
         /// Get the current queue size for this worker
         pub fn getQueueSize(self: *const Worker) usize {
