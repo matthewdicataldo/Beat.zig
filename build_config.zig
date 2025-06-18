@@ -68,7 +68,7 @@ pub fn detectBuildConfig(b: *std.Build, target: std.Build.ResolvedTarget, optimi
     };
     
     // Detect CPU count (cross-platform)
-    config.cpu_count = detectCpuCount(b);
+    config.cpu_count = detectCpuCount(b, target);
     config.physical_cores = estimatePhysicalCores(config.cpu_count, target.result.cpu.arch);
     
     // Detect CPU features based on target
@@ -86,15 +86,41 @@ pub fn detectBuildConfig(b: *std.Build, target: std.Build.ResolvedTarget, optimi
 }
 
 /// Cross-platform CPU count detection
-fn detectCpuCount(b: *std.Build) u32 {
+/// 
+/// This function safely detects CPU count for both native compilation and cross-compilation.
+/// For native builds, it probes the actual hardware. For cross-compilation, it uses
+/// reasonable defaults based on the target architecture to avoid build-time runtime dependencies.
+fn detectCpuCount(b: *std.Build, target: std.Build.ResolvedTarget) u32 {
     _ = b; // Build context not needed for CPU detection
-    // Try to get CPU count at build time
-    // Note: This runs on the build machine, not target machine
-    const detected = std.Thread.getCpuCount() catch 4;
     
-    // Reasonable bounds checking
-    const cpu_count = @as(u32, @intCast(detected));
-    return std.math.clamp(cpu_count, 1, 128);
+    // For cross-compilation, avoid runtime hardware probing
+    // Only probe hardware when building for the same platform
+    const target_info = target.result;
+    const is_native_build = builtin.os.tag == target_info.os.tag and 
+                           builtin.cpu.arch == target_info.cpu.arch;
+    
+    if (is_native_build) {
+        // Safe to probe hardware on native builds
+        const detected = std.Thread.getCpuCount() catch 4;
+        const cpu_count = @as(u32, @intCast(detected));
+        return std.math.clamp(cpu_count, 1, 128);
+    } else {
+        // Cross-compilation: use reasonable defaults based on target architecture
+        return getDefaultCpuCountForArch(target_info.cpu.arch);
+    }
+}
+
+/// Get default CPU count for target architecture during cross-compilation
+pub fn getDefaultCpuCountForArch(arch: std.Target.Cpu.Arch) u32 {
+    // Return reasonable defaults based on common configurations for each architecture
+    return switch (arch) {
+        .x86_64 => 8,   // Desktop/server x86_64 commonly has 4-16 cores
+        .aarch64 => 4,  // ARM64 devices commonly have 4-8 cores
+        .arm => 4,      // ARM32 devices commonly have 2-4 cores
+        .riscv64 => 4,  // RISC-V typically 4-8 cores
+        .wasm32, .wasm64 => 1, // WebAssembly is single-threaded by default
+        else => 4,      // Conservative default for unknown architectures
+    };
 }
 
 /// Estimate physical cores from logical cores
