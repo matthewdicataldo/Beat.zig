@@ -29,11 +29,6 @@ pub fn build(b: *std.Build) void {
     
     b.installArtifact(lib);
     
-    // Define the module for reuse across all targets
-    const zigpulse_module = b.addModule("zigpulse", .{
-        .root_source_file = b.path("src/core.zig"),
-    });
-    
     // Tests with auto-configuration
     const tests = b.addTest(.{
         .root_source_file = b.path("src/core.zig"),
@@ -64,7 +59,6 @@ pub fn build(b: *std.Build) void {
     bench_config.is_release_fast = true;
     bench_config.optimal_queue_size = auto_config.optimal_workers * 256; // Larger queues for benchmarks
     build_config.addBuildOptions(b, benchmark_exe, bench_config);
-    benchmark_exe.root_module.addImport("zigpulse", zigpulse_module);
     
     b.installArtifact(benchmark_exe);
     
@@ -72,7 +66,18 @@ pub fn build(b: *std.Build) void {
     const bench_step = b.step("bench", "Run benchmarks");
     bench_step.dependOn(&run_benchmark.step);
     
-    // Note: examples.zig does not exist at root - use examples/ directory
+    // Examples
+    const example_exe = b.addExecutable(.{
+        .name = "examples",
+        .root_source_file = b.path("examples.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    b.installArtifact(example_exe);
+    
+    const run_example = b.addRunArtifact(example_exe);
+    const example_step = b.step("examples", "Run examples");
+    example_step.dependOn(&run_example.step);
     
     // Modular usage example
     const modular_example = b.addExecutable(.{
@@ -84,6 +89,25 @@ pub fn build(b: *std.Build) void {
     // Export modules for external use
     _ = b.addModule("beat", .{
         .root_source_file = b.path("beat.zig"),  // Use the bundle file
+    });
+    
+    const zigpulse_module = b.addModule("zigpulse", .{
+        .root_source_file = b.path("src/core.zig"),
+    });
+    
+    // Add minotaur integration module
+    const minotaur_integration_module = b.addModule("minotaur_integration", .{
+        .root_source_file = b.path("src/minotaur_integration.zig"),
+    });
+    
+    // Add souper integration module
+    const souper_integration_module = b.addModule("souper_integration", .{
+        .root_source_file = b.path("src/souper_integration.zig"),
+    });
+    
+    // Add triple optimization module  
+    const triple_optimization_module = b.addModule("triple_optimization", .{
+        .root_source_file = b.path("src/triple_optimization.zig"),
     });
     
     modular_example.root_module.addImport("zigpulse", zigpulse_module);
@@ -104,118 +128,9 @@ pub fn build(b: *std.Build) void {
     const bundle_step = b.step("example-bundle", "Run bundle usage example");
     bundle_step.dependOn(&run_bundle.step);
     
-    // A3C Reinforcement Learning Demo
-    const a3c_demo = b.addExecutable(.{
-        .name = "a3c_demo",
-        .root_source_file = b.path("examples/a3c_demo.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    
-    build_config.addBuildOptions(b, a3c_demo, auto_config);
-    a3c_demo.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_a3c_demo = b.addRunArtifact(a3c_demo);
-    const a3c_demo_step = b.step("demo-a3c", "Run A3C Reinforcement Learning demo");
-    a3c_demo_step.dependOn(&run_a3c_demo.step);
-    
-    // Intensive profiling benchmark - using benchmarks directory
-    const profile_benchmark = b.addExecutable(.{
-        .name = "profile_intensive_benchmark",
-        .root_source_file = b.path("benchmarks/profile_intensive_benchmark.zig"),
-        .target = target,
-        .optimize = .ReleaseFast, // Fast for realistic profiling
-    });
-    build_config.addBuildOptions(b, profile_benchmark, auto_config);
-    profile_benchmark.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_profile_benchmark = b.addRunArtifact(profile_benchmark);
-    const profile_benchmark_step = b.step("profile-intensive", "Run intensive benchmark for profiling");
-    profile_benchmark_step.dependOn(&run_profile_benchmark.step);
-    
-    // Simple COZ benchmark
-    const coz_simple = b.addExecutable(.{
-        .name = "coz_benchmark_simple",
-        .root_source_file = b.path("benchmarks/coz_benchmark_simple.zig"),
-        .target = target,
-        .optimize = .ReleaseSafe, // Better for COZ profiling
-    });
-    build_config.addBuildOptions(b, coz_simple, auto_config);
-    coz_simple.root_module.addImport("zigpulse", zigpulse_module);
-    
-    // Enable frame pointers for better COZ profiling
-    if (enable_coz) {
-        coz_simple.root_module.omit_frame_pointer = false;
-    }
-    
-    const run_coz_simple = b.addRunArtifact(coz_simple);
-    const coz_simple_step = b.step("coz-simple", "Run simple COZ profiling benchmark");
-    coz_simple_step.dependOn(&run_coz_simple.step);
-    
-    // Intensive COZ benchmark - using benchmarks directory
-    const coz_intensive = b.addExecutable(.{
-        .name = "coz_intensive",
-        .root_source_file = b.path("benchmarks/coz_intensive.zig"),
-        .target = target,
-        .optimize = .ReleaseSafe,
-    });
-    build_config.addBuildOptions(b, coz_intensive, auto_config);
-    coz_intensive.root_module.addImport("zigpulse", zigpulse_module);
-    
-    // COZ frame pointer support
-    if (enable_coz) {
-        coz_intensive.root_module.omit_frame_pointer = false;
-    }
-    
-    const run_coz_intensive = b.addRunArtifact(coz_intensive);
-    const coz_intensive_step = b.step("coz-intensive", "Run intensive COZ profiling benchmark");
-    coz_intensive_step.dependOn(&run_coz_intensive.step);
-    
-    // Cache-line alignment benchmark
-    const cache_alignment_benchmark = b.addExecutable(.{
-        .name = "benchmark_cache_alignment",
-        .root_source_file = b.path("benchmarks/benchmark_cache_alignment.zig"),
-        .target = target,
-        .optimize = .ReleaseFast, // Use ReleaseFast for accurate performance measurement
-    });
-    build_config.addBuildOptions(b, cache_alignment_benchmark, auto_config);
-    cache_alignment_benchmark.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_cache_alignment_benchmark = b.addRunArtifact(cache_alignment_benchmark);
-    const cache_alignment_step = b.step("bench-cache-alignment", "Benchmark cache-line alignment optimizations");
-    cache_alignment_step.dependOn(&run_cache_alignment_benchmark.step);
-    
-    // Memory prefetching benchmark
-    const prefetching_benchmark = b.addExecutable(.{
-        .name = "benchmark_prefetching",
-        .root_source_file = b.path("benchmarks/benchmark_prefetching.zig"),
-        .target = target,
-        .optimize = .ReleaseFast, // Use ReleaseFast for accurate memory performance measurement
-    });
-    build_config.addBuildOptions(b, prefetching_benchmark, auto_config);
-    prefetching_benchmark.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_prefetching_benchmark = b.addRunArtifact(prefetching_benchmark);
-    const prefetching_step = b.step("bench-prefetching", "Benchmark memory prefetching optimizations");
-    prefetching_step.dependOn(&run_prefetching_benchmark.step);
-    
-    // Batch formation optimization benchmark
-    const batch_formation_benchmark = b.addExecutable(.{
-        .name = "benchmark_batch_formation",
-        .root_source_file = b.path("benchmarks/benchmark_batch_formation.zig"),
-        .target = target,
-        .optimize = .ReleaseFast, // Use ReleaseFast for accurate batch formation timing
-    });
-    build_config.addBuildOptions(b, batch_formation_benchmark, auto_config);
-    batch_formation_benchmark.root_module.addImport("zigpulse", zigpulse_module);
-    
-    const run_batch_formation_benchmark = b.addRunArtifact(batch_formation_benchmark);
-    const batch_formation_step = b.step("bench-batch-formation", "Benchmark batch formation optimizations");
-    batch_formation_step.dependOn(&run_batch_formation_benchmark.step);
-    
-    // Bundle file tests - using beat.zig as the bundle file
+    // Bundle file tests
     const bundle_test = b.addTest(.{
-        .root_source_file = b.path("beat.zig"),
+        .root_source_file = b.path("zigpulse.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -245,9 +160,9 @@ pub fn build(b: *std.Build) void {
     
     // Note: Legacy test executables removed - all tests now run via main test suite
     
-    // Build configuration demo (as test) - using examples directory
+    // Build configuration demo (as test)
     const build_config_demo = b.addTest(.{
-        .root_source_file = b.path("examples/build_config_demo.zig"),
+        .root_source_file = b.path("build_config_demo.zig"),
         .target = target,
         .optimize = .Debug,
     });
@@ -257,9 +172,9 @@ pub fn build(b: *std.Build) void {
     const build_config_demo_step = b.step("demo-config", "Run build configuration demo");
     build_config_demo_step.dependOn(&run_build_config_demo.step);
     
-    // Comptime work distribution demo - using examples directory
+    // Comptime work distribution demo
     const comptime_work_demo = b.addTest(.{
-        .root_source_file = b.path("examples/comptime_work_demo.zig"),
+        .root_source_file = b.path("comptime_work_demo.zig"),
         .target = target,
         .optimize = .Debug,
     });
@@ -339,9 +254,9 @@ pub fn build(b: *std.Build) void {
     const development_mode_test_step = b.step("test-development-mode", "Test development mode configuration features");
     development_mode_test_step.dependOn(&run_development_mode_test.step);
     
-    // Auto-configuration integration demo - using examples directory
+    // Auto-configuration integration demo
     const auto_config_integration_demo = b.addTest(.{
-        .root_source_file = b.path("examples/auto_config_integration_demo.zig"),
+        .root_source_file = b.path("auto_config_integration_demo.zig"),
         .target = target,
         .optimize = .Debug,
     });
@@ -614,19 +529,235 @@ pub fn build(b: *std.Build) void {
     const simd_benchmark_test_step = b.step("test-simd-benchmark", "Test comprehensive SIMD benchmarking and validation framework");
     simd_benchmark_test_step.dependOn(&run_simd_benchmark_test.step);
     
+    // Continuation stealing test (Task 7.1)
+    const continuation_stealing_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_stealing.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    continuation_stealing_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, continuation_stealing_test, auto_config);
     
-    // Note: test_ml_integration.zig does not exist at root - ML integration tests moved to tests/ directory
+    const run_continuation_stealing_test = b.addRunArtifact(continuation_stealing_test);
+    const continuation_stealing_test_step = b.step("test-continuation-stealing", "Test continuation stealing implementation");
+    continuation_stealing_test_step.dependOn(&run_continuation_stealing_test.step);
     
-    // Legacy benchmarks removed - use optimized benchmark suite
+    // ThreadPool continuation integration test (Task 7.1)
+    const threadpool_continuation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_threadpool_continuation_integration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    threadpool_continuation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, threadpool_continuation_test, auto_config);
     
-    // Legacy optimization tests removed - functionality integrated into main test suite
+    const run_threadpool_continuation_test = b.addRunArtifact(threadpool_continuation_test);
+    const threadpool_continuation_test_step = b.step("test-threadpool-continuation", "Test ThreadPool integration with continuation stealing");
+    threadpool_continuation_test_step.dependOn(&run_threadpool_continuation_test.step);
     
-    // Note: fixed_cache_optimization.zig does not exist at root - cache optimization integrated into main library
+    // NUMA-aware continuation stealing test (Task 7.2)
+    const numa_continuation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_numa_continuation_stealing.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    numa_continuation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, numa_continuation_test, auto_config);
     
-    // Batch formation profiling - using examples directory
+    const run_numa_continuation_test = b.addRunArtifact(numa_continuation_test);
+    const numa_continuation_test_step = b.step("test-numa-continuation-stealing", "Test NUMA-aware continuation stealing with locality tracking");
+    numa_continuation_test_step.dependOn(&run_numa_continuation_test.step);
+    
+    // SIMD-enhanced continuation integration test (Phase 1 integration)
+    const simd_continuation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_simd_integration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    simd_continuation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, simd_continuation_test, auto_config);
+    
+    const run_simd_continuation_test = b.addRunArtifact(simd_continuation_test);
+    const simd_continuation_test_step = b.step("test-simd-continuation", "Test SIMD-enhanced continuation processing with 6-23x performance improvement");
+    simd_continuation_test_step.dependOn(&run_simd_continuation_test.step);
+    
+    // Predictive accounting integration test (Phase 1 integration)
+    const predictive_continuation_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_predictive_simple.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    predictive_continuation_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, predictive_continuation_test, auto_config);
+    
+    const run_predictive_continuation_test = b.addRunArtifact(predictive_continuation_test);
+    const predictive_continuation_test_step = b.step("test-predictive-continuation", "Test predictive accounting integration with One Euro Filter and adaptive NUMA placement");
+    predictive_continuation_test_step.dependOn(&run_predictive_continuation_test.step);
+    
+    // Advanced worker selection integration test (Phase 1 integration)
+    const worker_selection_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_continuation_worker_selection.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    worker_selection_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, worker_selection_test, auto_config);
+    
+    const run_worker_selection_test = b.addRunArtifact(worker_selection_test);
+    const worker_selection_test_step = b.step("test-worker-selection", "Test advanced worker selection integration with multi-criteria optimization");
+    worker_selection_test_step.dependOn(&run_worker_selection_test.step);
+    
+    // ML-based classification integration test (Task 3.2.2)
+    const ml_integration_test = b.addTest(.{
+        .root_source_file = b.path("test_ml_integration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    ml_integration_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, ml_integration_test, auto_config);
+    
+    const run_ml_integration_test = b.addRunArtifact(ml_integration_test);
+    const ml_integration_test_step = b.step("test-ml-integration", "Test ML-based classification for heterogeneous computing (Task 3.2.2)");
+    ml_integration_test_step.dependOn(&run_ml_integration_test.step);
+    
+    // Advanced scheduling benchmark
+    const advanced_scheduling_benchmark = b.addExecutable(.{
+        .name = "benchmark_advanced_scheduling",
+        .root_source_file = b.path("benchmark_advanced_scheduling.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, advanced_scheduling_benchmark, auto_config);
+    
+    const run_advanced_scheduling_benchmark = b.addRunArtifact(advanced_scheduling_benchmark);
+    const advanced_scheduling_benchmark_step = b.step("bench-advanced-scheduling", "Benchmark advanced predictive scheduling performance improvements");
+    advanced_scheduling_benchmark_step.dependOn(&run_advanced_scheduling_benchmark.step);
+    
+    // Simple scheduling benchmark
+    const simple_scheduling_benchmark = b.addExecutable(.{
+        .name = "benchmark_simple_scheduling",
+        .root_source_file = b.path("benchmark_simple_scheduling.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, simple_scheduling_benchmark, auto_config);
+    
+    const run_simple_scheduling_benchmark = b.addRunArtifact(simple_scheduling_benchmark);
+    const simple_scheduling_benchmark_step = b.step("bench-simple-scheduling", "Simple focused benchmark for advanced scheduling features");
+    simple_scheduling_benchmark_step.dependOn(&run_simple_scheduling_benchmark.step);
+    
+    // Prediction accuracy micro-benchmark
+    const prediction_accuracy_benchmark = b.addExecutable(.{
+        .name = "benchmark_prediction_accuracy",
+        .root_source_file = b.path("benchmark_prediction_accuracy.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, prediction_accuracy_benchmark, auto_config);
+    
+    const run_prediction_accuracy_benchmark = b.addRunArtifact(prediction_accuracy_benchmark);
+    const prediction_accuracy_benchmark_step = b.step("bench-prediction-accuracy", "Micro-benchmarks for prediction accuracy measurement (Task 2.5.1)");
+    prediction_accuracy_benchmark_step.dependOn(&run_prediction_accuracy_benchmark.step);
+    
+    // A/B testing framework
+    const ab_testing_framework = b.addExecutable(.{
+        .name = "ab_testing_framework",
+        .root_source_file = b.path("ab_testing_framework.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, ab_testing_framework, auto_config);
+    
+    const run_ab_testing_framework = b.addRunArtifact(ab_testing_framework);
+    const ab_testing_framework_step = b.step("ab-test", "A/B testing infrastructure for scheduling comparison (Task 2.5.1.2)");
+    ab_testing_framework_step.dependOn(&run_ab_testing_framework.step);
+    
+    // Enhanced COZ profiler benchmark
+    const coz_enhanced_benchmark = b.addExecutable(.{
+        .name = "benchmark_coz_enhanced",
+        .root_source_file = b.path("benchmark_coz_enhanced.zig"),
+        .target = target,
+        .optimize = if (enable_coz) .ReleaseSafe else .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, coz_enhanced_benchmark, auto_config);
+    
+    if (enable_coz) {
+        coz_enhanced_benchmark.root_module.omit_frame_pointer = false;
+    }
+    
+    const run_coz_enhanced_benchmark = b.addRunArtifact(coz_enhanced_benchmark);
+    const coz_enhanced_benchmark_step = b.step("bench-coz-enhanced", "Enhanced COZ profiler integration benchmark (Task 2.5.1.3)");
+    coz_enhanced_benchmark_step.dependOn(&run_coz_enhanced_benchmark.step);
+    
+    // Fingerprint cache optimization
+    const cache_optimization = b.addExecutable(.{
+        .name = "fingerprint_cache_optimization",
+        .root_source_file = b.path("fingerprint_cache_optimization.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, cache_optimization, auto_config);
+    
+    const run_cache_optimization = b.addRunArtifact(cache_optimization);
+    const cache_optimization_step = b.step("test-cache-optimization", "Test prediction lookup caching optimization");
+    cache_optimization_step.dependOn(&run_cache_optimization.step);
+    
+    // Optimization validation framework
+    const optimization_validation = b.addExecutable(.{
+        .name = "optimization_validation",
+        .root_source_file = b.path("optimization_validation.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, optimization_validation, auto_config);
+    
+    const run_optimization_validation = b.addRunArtifact(optimization_validation);
+    const optimization_validation_step = b.step("validate-optimizations", "Validate optimization performance improvements");
+    optimization_validation_step.dependOn(&run_optimization_validation.step);
+    
+    // Worker selection fast path optimization
+    const worker_selection_optimization = b.addExecutable(.{
+        .name = "worker_selection_optimization",
+        .root_source_file = b.path("worker_selection_optimization.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, worker_selection_optimization, auto_config);
+    
+    const run_worker_selection_optimization = b.addRunArtifact(worker_selection_optimization);
+    const worker_selection_optimization_step = b.step("test-worker-selection-optimization", "Test worker selection fast path optimization to reduce 120.6x overhead");
+    worker_selection_optimization_step.dependOn(&run_worker_selection_optimization.step);
+    
+    // Integrated worker selection optimization test
+    const integrated_worker_optimization = b.addExecutable(.{
+        .name = "optimized_worker_selection_integration",
+        .root_source_file = b.path("optimized_worker_selection_integration.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, integrated_worker_optimization, auto_config);
+    
+    const run_integrated_worker_optimization = b.addRunArtifact(integrated_worker_optimization);
+    const integrated_worker_optimization_step = b.step("test-integrated-worker-optimization", "Test integrated worker selection optimization for direct ThreadPool integration");
+    integrated_worker_optimization_step.dependOn(&run_integrated_worker_optimization.step);
+    
+    // Fixed cache optimization test
+    const fixed_cache_optimization = b.addExecutable(.{
+        .name = "fixed_cache_optimization",
+        .root_source_file = b.path("fixed_cache_optimization.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, fixed_cache_optimization, auto_config);
+    
+    const run_fixed_cache_optimization = b.addRunArtifact(fixed_cache_optimization);
+    const fixed_cache_optimization_step = b.step("test-fixed-cache-optimization", "Test fixed prediction lookup caching with proper memory management");
+    fixed_cache_optimization_step.dependOn(&run_fixed_cache_optimization.step);
+    
+    // Batch formation profiling
     const batch_formation_profile = b.addExecutable(.{
         .name = "batch_formation_profile",
-        .root_source_file = b.path("examples/batch_formation_profile.zig"),
+        .root_source_file = b.path("batch_formation_profile.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
@@ -637,10 +768,10 @@ pub fn build(b: *std.Build) void {
     const batch_formation_profile_step = b.step("profile-batch-formation", "Profile batch formation performance bottlenecks");
     batch_formation_profile_step.dependOn(&run_batch_formation_profile.step);
     
-    // Work-stealing efficiency benchmark with fast path optimization - using examples directory
+    // Work-stealing efficiency benchmark with fast path optimization
     const work_stealing_benchmark = b.addExecutable(.{
         .name = "work_stealing_benchmark",
-        .root_source_file = b.path("examples/work_stealing_benchmark.zig"),
+        .root_source_file = b.path("work_stealing_benchmark.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
@@ -651,47 +782,38 @@ pub fn build(b: *std.Build) void {
     const work_stealing_benchmark_step = b.step("bench-work-stealing", "Benchmark work-stealing efficiency with fast path optimization");
     work_stealing_benchmark_step.dependOn(&run_work_stealing_benchmark.step);
     
-    // Lock-free contention analysis benchmark
-    const lockfree_contention_benchmark = b.addExecutable(.{
-        .name = "benchmark_lockfree_contention",
-        .root_source_file = b.path("benchmarks/benchmark_lockfree_contention.zig"),
+    // Continuation stealing comprehensive benchmark (Task 7.3)
+    const continuation_stealing_benchmark = b.addExecutable(.{
+        .name = "benchmark_continuation_stealing",
+        .root_source_file = b.path("benchmarks/benchmark_continuation_stealing.zig"),
         .target = target,
         .optimize = .ReleaseFast,
     });
-    lockfree_contention_benchmark.root_module.addImport("zigpulse", zigpulse_module);
-    build_config.addBuildOptions(b, lockfree_contention_benchmark, auto_config);
+    continuation_stealing_benchmark.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, continuation_stealing_benchmark, auto_config);
     
-    const run_lockfree_contention_benchmark = b.addRunArtifact(lockfree_contention_benchmark);
-    const lockfree_contention_benchmark_step = b.step("bench-lockfree-contention", "Analyze CAS contention patterns in lock-free queue (15-25% improvement target)");
-    lockfree_contention_benchmark_step.dependOn(&run_lockfree_contention_benchmark.step);
+    const run_continuation_stealing_benchmark = b.addRunArtifact(continuation_stealing_benchmark);
+    const continuation_stealing_benchmark_step = b.step("bench-continuation-stealing", "Comprehensive benchmark: Work stealing vs NUMA-aware continuation stealing");
+    continuation_stealing_benchmark_step.dependOn(&run_continuation_stealing_benchmark.step);
     
-    // Worker selection optimization benchmark
-    const worker_selection_benchmark = b.addExecutable(.{
-        .name = "benchmark_worker_selection",
-        .root_source_file = b.path("benchmarks/benchmark_worker_selection.zig"),
+    // COZ profiling benchmark for continuation stealing (Task 7.4)
+    const continuation_stealing_coz_benchmark = b.addExecutable(.{
+        .name = "benchmark_continuation_stealing_coz",
+        .root_source_file = b.path("benchmarks/benchmark_continuation_stealing_coz.zig"),
         .target = target,
-        .optimize = .ReleaseFast,
+        .optimize = if (enable_coz) .ReleaseSafe else .ReleaseFast,
     });
-    worker_selection_benchmark.root_module.addImport("zigpulse", zigpulse_module);
-    build_config.addBuildOptions(b, worker_selection_benchmark, auto_config);
     
-    const run_worker_selection_benchmark = b.addRunArtifact(worker_selection_benchmark);
-    const worker_selection_benchmark_step = b.step("bench-worker-selection", "Analyze worker selection allocation overhead (10-15% improvement target)");
-    worker_selection_benchmark_step.dependOn(&run_worker_selection_benchmark.step);
+    if (enable_coz) {
+        continuation_stealing_coz_benchmark.root_module.omit_frame_pointer = false;
+    }
     
-    // Worker selection optimization validation benchmark
-    const worker_selection_optimized_benchmark = b.addExecutable(.{
-        .name = "benchmark_worker_selection_optimized",
-        .root_source_file = b.path("benchmarks/benchmark_worker_selection_optimized.zig"),
-        .target = target,
-        .optimize = .ReleaseFast,
-    });
-    worker_selection_optimized_benchmark.root_module.addImport("zigpulse", zigpulse_module);
-    build_config.addBuildOptions(b, worker_selection_optimized_benchmark, auto_config);
+    continuation_stealing_coz_benchmark.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, continuation_stealing_coz_benchmark, auto_config);
     
-    const run_worker_selection_optimized_benchmark = b.addRunArtifact(worker_selection_optimized_benchmark);
-    const worker_selection_optimized_benchmark_step = b.step("bench-worker-selection-optimized", "Validate worker selection optimization performance (14.4μs overhead eliminated)");
-    worker_selection_optimized_benchmark_step.dependOn(&run_worker_selection_optimized_benchmark.step);
+    const run_continuation_stealing_coz_benchmark = b.addRunArtifact(continuation_stealing_coz_benchmark);
+    const continuation_stealing_coz_benchmark_step = b.step("bench-continuation-stealing-coz", "COZ profiling benchmark for continuation stealing bottleneck analysis");
+    continuation_stealing_coz_benchmark_step.dependOn(&run_continuation_stealing_coz_benchmark.step);
     
     // ============================================================================
     // Souper Superoptimization Integration
@@ -935,10 +1057,10 @@ pub fn build(b: *std.Build) void {
         const ispc_benchmark_step = b.step("bench-ispc", "Benchmark ISPC SPMD performance vs native Zig implementations");
         ispc_benchmark_step.dependOn(&run_ispc_benchmark.step);
         
-        // Optimized ISPC kernels test - using tests directory
+        // Optimized ISPC kernels test
         const optimized_kernels_test = b.addExecutable(.{
             .name = "test_optimized_kernels",
-            .root_source_file = b.path("tests/test_optimized_kernels.zig"),
+            .root_source_file = b.path("test_optimized_kernels.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -959,10 +1081,10 @@ pub fn build(b: *std.Build) void {
         const optimized_kernels_test_step = b.step("test-optimized-kernels", "Test ultra-optimized mega-batch ISPC kernels with overhead reduction");
         optimized_kernels_test_step.dependOn(&run_optimized_kernels_test.step);
         
-        // Heartbeat scheduling ISPC kernels test - using tests directory
+        // Heartbeat scheduling ISPC kernels test
         const heartbeat_kernels_test = b.addExecutable(.{
             .name = "test_heartbeat_kernels",
-            .root_source_file = b.path("tests/test_heartbeat_kernels.zig"),
+            .root_source_file = b.path("test_heartbeat_kernels.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -983,9 +1105,9 @@ pub fn build(b: *std.Build) void {
         const heartbeat_kernels_test_step = b.step("test-heartbeat-kernels", "Test ISPC heartbeat scheduling and worker management kernels");
         heartbeat_kernels_test_step.dependOn(&run_heartbeat_kernels_test.step);
         
-        // Advanced ISPC Research Test Suite (Phase 3 Deep Dive) - using tests directory
+        // Advanced ISPC Research Test Suite (Phase 3 Deep Dive)
         const advanced_ispc_research_test = b.addTest(.{
-            .root_source_file = b.path("tests/test_advanced_ispc_research.zig"),
+            .root_source_file = b.path("test_advanced_ispc_research.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -1007,9 +1129,9 @@ pub fn build(b: *std.Build) void {
         const advanced_ispc_research_test_step = b.step("test-advanced-ispc-research", "Test cutting-edge ISPC features: tasks, GPU, @ispc builtin prototype");
         advanced_ispc_research_test_step.dependOn(&run_advanced_ispc_research_test.step);
         
-        // Prediction Integration Test Suite (Production Integration) - using tests directory
+        // Prediction Integration Test Suite (Production Integration)
         const prediction_integration_test = b.addTest(.{
-            .root_source_file = b.path("tests/test_prediction_integration.zig"),
+            .root_source_file = b.path("test_prediction_integration.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -1031,9 +1153,9 @@ pub fn build(b: *std.Build) void {
         prediction_integration_test_step.dependOn(&run_prediction_integration_test.step);
     }
     
-    // Souper mathematical optimization integration test - using tests directory
+    // Souper mathematical optimization integration test
     const souper_integration_test = b.addTest(.{
-        .root_source_file = b.path("tests/test_souper_integration.zig"),
+        .root_source_file = b.path("test_souper_integration.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -1043,9 +1165,9 @@ pub fn build(b: *std.Build) void {
     const souper_integration_test_step = b.step("test-souper-integration", "Test Souper mathematical optimizations with formal verification");
     souper_integration_test_step.dependOn(&run_souper_integration_test.step);
     
-    // Souper simple test (without ISPC dependencies) - using tests directory
+    // Souper simple test (without ISPC dependencies)
     const souper_simple_test = b.addTest(.{
-        .root_source_file = b.path("tests/test_souper_simple.zig"),
+        .root_source_file = b.path("test_souper_simple.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -1060,6 +1182,67 @@ pub fn build(b: *std.Build) void {
     for (ispc_steps.items) |ispc_step| {
         ispc_all_step.dependOn(ispc_step);
     }
+    
+    // Minotaur SIMD superoptimization tests
+    const minotaur_integration_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_minotaur_integration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    minotaur_integration_test.root_module.addImport("beat", zigpulse_module);
+    minotaur_integration_test.root_module.addImport("minotaur_integration", minotaur_integration_module);
+    build_config.addBuildOptions(b, minotaur_integration_test, auto_config);
+    
+    const run_minotaur_integration_test = b.addRunArtifact(minotaur_integration_test);
+    const minotaur_integration_test_step = b.step("test-minotaur-integration", "Test Minotaur SIMD superoptimization integration");
+    minotaur_integration_test_step.dependOn(&run_minotaur_integration_test.step);
+    
+    // Triple-optimization pipeline tests
+    const triple_optimization_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_triple_optimization.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    triple_optimization_test.root_module.addImport("beat", zigpulse_module);
+    triple_optimization_test.root_module.addImport("triple_optimization", triple_optimization_module);
+    triple_optimization_test.root_module.addImport("minotaur_integration", minotaur_integration_module);
+    triple_optimization_test.root_module.addImport("souper_integration", souper_integration_module);
+    build_config.addBuildOptions(b, triple_optimization_test, auto_config);
+    
+    const run_triple_optimization_test = b.addRunArtifact(triple_optimization_test);
+    const triple_optimization_test_step = b.step("test-triple-optimization", "Test Souper + Minotaur + ISPC triple-optimization pipeline");
+    triple_optimization_test_step.dependOn(&run_triple_optimization_test.step);
+    
+    // ISPC Migration Tests 
+    const ispc_migration_test = b.addTest(.{
+        .root_source_file = b.path("tests/test_ispc_migration.zig"),
+        .target = target,
+        .optimize = .Debug,
+    });
+    ispc_migration_test.root_module.addImport("beat", zigpulse_module);
+    build_config.addBuildOptions(b, ispc_migration_test, auto_config);
+    
+    const run_ispc_migration_test = b.addRunArtifact(ispc_migration_test);
+    const ispc_migration_test_step = b.step("test-ispc-migration", "Test Zig SIMD → ISPC migration and API compatibility");
+    ispc_migration_test_step.dependOn(&run_ispc_migration_test.step);
+    
+    // Superoptimization setup and analysis commands
+    const setup_minotaur_cmd = b.addSystemCommand(&[_][]const u8{ "bash", "scripts/setup_minotaur.sh" });
+    const setup_minotaur_step = b.step("setup-minotaur", "Set up Minotaur SIMD superoptimizer");
+    setup_minotaur_step.dependOn(&setup_minotaur_cmd.step);
+    
+    const run_minotaur_analysis_cmd = b.addSystemCommand(&[_][]const u8{ "bash", "scripts/run_minotaur_analysis.sh" });
+    const run_minotaur_analysis_step = b.step("analyze-minotaur", "Run Minotaur SIMD analysis on Beat.zig code");
+    run_minotaur_analysis_step.dependOn(&run_minotaur_analysis_cmd.step);
+    
+    const run_combined_optimization_cmd = b.addSystemCommand(&[_][]const u8{ "bash", "scripts/run_combined_optimization.sh" });
+    const run_combined_optimization_step = b.step("analyze-triple", "Run combined Souper + Minotaur + ISPC optimization analysis");
+    run_combined_optimization_step.dependOn(&run_combined_optimization_cmd.step);
+    
+    // Configure ISPC migration strategy for Zig SIMD → ISPC transition
+    configureISPCMigration(b, target, optimize) catch |err| {
+        std.log.warn("ISPC migration configuration failed: {}", .{err});
+    };
 }
 
 // Helper function to check ISPC compiler availability
@@ -1073,6 +1256,59 @@ fn checkISPCAvailable(b: *std.Build) bool {
     defer b.allocator.free(result.stderr);
     
     return result.term == .Exited and result.term.Exited == 0;
+}
+
+// ISPC Migration Strategy: Prioritize ISPC kernels over Zig SIMD
+fn configureISPCMigration(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) !void {
+    _ = optimize;
+    const ispc_available = checkISPCAvailable(b);
+    
+    if (ispc_available) {
+        std.log.info("ISPC detected: Enabling optimized SIMD kernels (6-23x performance)", .{});
+        
+        // Add ISPC compilation steps for new kernels
+        const new_ispc_kernels = [_][]const u8{
+            "simd_capabilities",
+            "simd_memory", 
+            "simd_queue_ops",
+        };
+        
+        for (new_ispc_kernels) |kernel| {
+            // Create ISPC compilation command
+            const ispc_cmd = b.addSystemCommand(&[_][]const u8{
+                "ispc",
+                b.fmt("src/kernels/{s}.ispc", .{kernel}),
+                "-o", b.fmt("zig-cache/ispc/{s}.o", .{kernel}),
+                "-h", b.fmt("zig-cache/ispc/{s}.h", .{kernel}),
+                "--opt=fast-math",
+                "--pic",
+                "--addressing=64",
+            });
+            
+            // Add target-specific ISPC args
+            if (target.result.cpu.arch == .x86_64) {
+                ispc_cmd.addArg("--target=avx2-i32x8,avx512skx-i32x16");
+            } else if (target.result.cpu.arch == .aarch64) {
+                ispc_cmd.addArg("--target=neon-i32x4");
+            }
+            
+            // Create build step for ISPC compilation
+            const ispc_step = b.step(b.fmt("ispc-{s}", .{kernel}), b.fmt("Compile {s} ISPC kernel", .{kernel}));
+            ispc_step.dependOn(&ispc_cmd.step);
+        }
+        
+        // Add compile-time flag to enable ISPC-first strategy
+        const ispc_flag = b.addOptions();
+        ispc_flag.addOption(bool, "use_ispc_simd", true);
+        ispc_flag.addOption(bool, "deprecate_zig_simd", true);
+        
+    } else {
+        std.log.warn("ISPC not found: Falling back to Zig SIMD (reduced performance)", .{});
+        
+        const fallback_flag = b.addOptions();
+        fallback_flag.addOption(bool, "use_ispc_simd", false);
+        fallback_flag.addOption(bool, "deprecate_zig_simd", false);
+    }
 }
 
 // Auto-detect optimal ISPC target based on CPU capabilities

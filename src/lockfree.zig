@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const assert = std.debug.assert;
-const prefetch = @import("prefetch.zig");
+const continuation = @import("continuation.zig");
 
 // Lock-free data structures for ZigPulse
 
@@ -17,6 +17,125 @@ pub fn Task(comptime T: type) type {
 }
 
 // ============================================================================
+// Work Item for Continuation Stealing
+// ============================================================================
+
+/// Hybrid work item that can contain either a task or continuation
+/// Enables continuation stealing within existing work-stealing infrastructure
+pub const WorkItem = union(enum) {
+    task: *anyopaque,           // Pointer to Task
+    continuation: *continuation.Continuation,  // Pointer to Continuation
+    
+    const Self = @This();
+    
+    /// Create work item from task
+    pub fn fromTask(task: *anyopaque) Self {
+        return Self{ .task = task };
+    }
+    
+    /// Create work item from continuation  
+    pub fn fromContinuation(cont: *continuation.Continuation) Self {
+        return Self{ .continuation = cont };
+    }
+    
+    /// Check if work item is a task
+    pub fn isTask(self: Self) bool {
+        return switch (self) {
+            .task => true,
+            .continuation => false,
+        };
+    }
+    
+    /// Check if work item is a continuation
+    pub fn isContinuation(self: Self) bool {
+        return switch (self) {
+            .task => false,
+            .continuation => true,
+        };
+    }
+    
+    /// Get task pointer (caller must verify isTask() first)
+    pub fn getTask(self: Self) *anyopaque {
+        return switch (self) {
+            .task => |task| task,
+            .continuation => unreachable,
+        };
+    }
+    
+    /// Get continuation pointer (caller must verify isContinuation() first)
+    pub fn getContinuation(self: Self) *continuation.Continuation {
+        return switch (self) {
+            .task => unreachable,
+            .continuation => |cont| cont,
+        };
+    }
+    
+    /// Execute the work item (task or continuation)
+    pub fn execute(self: Self, worker_id: u32) void {
+        switch (self) {
+            .task => |task| {
+                // Execute task using existing mechanism
+                // Note: This requires the caller to cast to proper Task type
+                _ = task; // Placeholder - actual execution handled by caller
+            },
+            .continuation => |cont| {
+                // Execute continuation
+                cont.markRunning(worker_id);
+                cont.execute();
+            },
+        }
+    }
+    
+    /// Get priority for scheduling (higher value = higher priority)
+    pub fn getPriority(self: Self) u32 {
+        return switch (self) {
+            .task => 1000, // Default task priority
+            .continuation => |cont| cont.getPriority(),
+        };
+    }
+    
+    /// Check if work item can be stolen
+    pub fn canBeStolen(self: Self) bool {
+        return switch (self) {
+            .task => true, // Tasks can always be stolen
+            .continuation => |cont| cont.canBeStolen(),
+        };
+    }
+    
+    /// Mark work item as stolen
+    pub fn markStolen(self: Self, new_worker_id: u32) void {
+        switch (self) {
+            .task => {}, // Tasks don't track stealing state
+            .continuation => |cont| cont.markStolen(new_worker_id),
+        }
+    }
+    
+    /// Mark work item as stolen with NUMA awareness
+    pub fn markStolenWithNuma(self: Self, new_worker_id: u32, new_numa_node: ?u32, new_socket: ?u32) void {
+        switch (self) {
+            .task => {}, // Tasks don't use NUMA tracking
+            .continuation => |cont| cont.markStolenWithNuma(new_worker_id, new_numa_node, new_socket),
+        }
+    }
+    
+    /// Get NUMA stealing preference for this work item
+    pub fn getNumaStealingPreference(self: Self, target_numa_node: ?u32, target_socket: ?u32) f32 {
+        return switch (self) {
+            .task => 0.5, // Tasks have neutral NUMA preference
+            .continuation => |cont| cont.getStealingPreference(target_numa_node, target_socket),
+        };
+    }
+    
+    /// Check if work item prefers local execution
+    pub fn prefersLocalExecution(self: Self) bool {
+        return switch (self) {
+            .task => false, // Tasks don't have locality preference
+            .continuation => |cont| cont.prefersLocalExecution(),
+        };
+    }
+};
+
+// ============================================================================
 // Work-Stealing Deque (Chase-Lev Algorithm)
 // ============================================================================
 
@@ -25,30 +144,20 @@ pub fn WorkStealingDeque(comptime T: type) type {
         const Self = @This();
         const AtomicU64 = std.atomic.Value(u64);
         
-        // HOT PATH: Critical atomic indices (separate cache lines to avoid false sharing)
-        hot_data: struct {
-            top: AtomicU64,    // Thieves steal from top
-            _pad1: [64 - @sizeOf(AtomicU64)]u8 = [_]u8{0} ** (64 - @sizeOf(AtomicU64)),
-            bottom: AtomicU64, // Owner works from bottom  
-            _pad2: [64 - @sizeOf(AtomicU64)]u8 = [_]u8{0} ** (64 - @sizeOf(AtomicU64)),
-        } align(64) = .{
-            .top = AtomicU64.init(0),
-            .bottom = AtomicU64.init(0),
-        },
-        
-        // WARM PATH: Core deque state (accessed during resize/init)
+        // Core deque state
         buffer: []?T,
         capacity: u64,
         mask: u64,
         allocator: std.mem.Allocator,
         
-        // COLD PATH: Statistics (separate cache line)
-        stats: struct {
-            push_count: AtomicU64 = AtomicU64.init(0),
-            pop_count: AtomicU64 = AtomicU64.init(0),
-            steal_count: AtomicU64 = AtomicU64.init(0),
-            _pad: [64 - 3 * @sizeOf(AtomicU64)]u8 = [_]u8{0} ** (64 - 3 * @sizeOf(AtomicU64)),
-        } align(64) = .{},
+        // Atomic indices
+        top: AtomicU64,    // Thieves steal from top
+        bottom: AtomicU64, // Owner works from bottom
+        
+        // Statistics
+        push_count: AtomicU64 = AtomicU64.init(0),
+        pop_count: AtomicU64 = AtomicU64.init(0),
+        steal_count: AtomicU64 = AtomicU64.init(0),
         
         pub fn init(allocator: std.mem.Allocator, capacity: u64) !Self {
             // Ensure capacity is power of 2
@@ -68,7 +177,8 @@ pub fn WorkStealingDeque(comptime T: type) type {
                 .capacity = actual_capacity,
                 .mask = actual_capacity - 1,
                 .allocator = allocator,
-                // hot_data and stats are initialized with defaults
+                .top = AtomicU64.init(0),
+                .bottom = AtomicU64.init(0),
             };
         }
         
@@ -79,8 +189,8 @@ pub fn WorkStealingDeque(comptime T: type) type {
         // Owner operations (single producer)
         
         pub fn pushBottom(self: *Self, item: T) !void {
-            const b = self.hot_data.bottom.load(.monotonic);
-            const t = self.hot_data.top.load(.acquire);
+            const b = self.bottom.load(.monotonic);
+            const t = self.top.load(.acquire);
             
             // Check if full (handle wraparound)
             const current_size = if (b >= t) b - t else 0;
@@ -92,42 +202,27 @@ pub fn WorkStealingDeque(comptime T: type) type {
                 return error.WorkStealingDequeFull;
             }
             
-            // Prefetch the buffer location we're about to write to
-            // This brings the cache line into cache before the write
-            const buffer_index = b & self.mask;
-            prefetch.prefetch(&self.buffer[buffer_index], .write, .temporal_high);
-            
-            // Prefetch the next few buffer locations for sequential operations
-            if (buffer_index + 1 < self.buffer.len) {
-                prefetch.prefetch(&self.buffer[buffer_index + 1], .write, .temporal_medium);
-            }
-            
             // Store item
-            self.buffer[buffer_index] = item;
+            self.buffer[b & self.mask] = item;
             
             // Increment bottom with release ordering to ensure task is visible
-            self.hot_data.bottom.store(b + 1, .release);
+            self.bottom.store(b + 1, .release);
             
-            _ = self.stats.push_count.fetchAdd(1, .monotonic);
+            _ = self.push_count.fetchAdd(1, .monotonic);
         }
         
         pub fn popBottom(self: *Self) ?T {
-            const b = self.hot_data.bottom.load(.monotonic);
+            const b = self.bottom.load(.monotonic);
             if (b == 0) return null;
             
             const new_b = b - 1;
+            self.bottom.store(new_b, .seq_cst);
             
-            // Prefetch the item we're about to read
-            const buffer_index = new_b & self.mask;
-            prefetch.prefetch(&self.buffer[buffer_index], .read, .temporal_high);
-            
-            self.hot_data.bottom.store(new_b, .seq_cst);
-            
-            const t = self.hot_data.top.load(.monotonic);
+            const t = self.top.load(.monotonic);
             
             if (@as(i64, @intCast(new_b)) < @as(i64, @intCast(t))) {
                 // Empty
-                self.hot_data.bottom.store(t, .monotonic);
+                self.bottom.store(t, .monotonic);
                 return null;
             }
             
@@ -135,19 +230,19 @@ pub fn WorkStealingDeque(comptime T: type) type {
             
             if (new_b == t) {
                 // Last element - race with thieves
-                if (self.hot_data.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic) == null) {
+                if (self.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic) == null) {
                     // Won the race
-                    self.hot_data.bottom.store(t + 1, .monotonic);
-                    _ = self.stats.pop_count.fetchAdd(1, .monotonic);
+                    self.bottom.store(t + 1, .monotonic);
+                    _ = self.pop_count.fetchAdd(1, .monotonic);
                     return item;
                 } else {
                     // Lost the race
-                    self.hot_data.bottom.store(t + 1, .monotonic);
+                    self.bottom.store(t + 1, .monotonic);
                     return null;
                 }
             } else {
                 // No race
-                _ = self.stats.pop_count.fetchAdd(1, .monotonic);
+                _ = self.pop_count.fetchAdd(1, .monotonic);
                 return item;
             }
         }
@@ -155,29 +250,20 @@ pub fn WorkStealingDeque(comptime T: type) type {
         // Thief operations (multiple consumers)
         
         pub fn steal(self: *Self) ?T {
-            const t = self.hot_data.top.load(.acquire);
-            const b = self.hot_data.bottom.load(.seq_cst);
+            const t = self.top.load(.acquire);
+            const b = self.bottom.load(.seq_cst);
             
             if (@as(i64, @intCast(t)) >= @as(i64, @intCast(b))) {
                 // Empty
                 return null;
             }
             
-            // Prefetch the item we're about to steal
-            const buffer_index = t & self.mask;
-            prefetch.prefetch(&self.buffer[buffer_index], .read, .temporal_high);
-            
-            // Also prefetch the next item in case multiple steals happen
-            if (buffer_index + 1 < self.buffer.len and (t + 1) < b) {
-                prefetch.prefetch(&self.buffer[(t + 1) & self.mask], .read, .temporal_medium);
-            }
-            
-            const item = self.buffer[buffer_index];
+            const item = self.buffer[t & self.mask];
             
             // Try to increment top
-            if (self.hot_data.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic) == null) {
+            if (self.top.cmpxchgWeak(t, t + 1, .seq_cst, .monotonic) == null) {
                 // Success
-                _ = self.stats.steal_count.fetchAdd(1, .monotonic);
+                _ = self.steal_count.fetchAdd(1, .monotonic);
                 return item;
             }
             
@@ -186,8 +272,8 @@ pub fn WorkStealingDeque(comptime T: type) type {
         }
         
         pub fn size(self: *const Self) u64 {
-            const b = self.hot_data.bottom.load(.monotonic);
-            const t = self.hot_data.top.load(.monotonic);
+            const b = self.bottom.load(.monotonic);
+            const t = self.top.load(.monotonic);
             return if (b >= t) b - t else 0;
         }
         
@@ -197,9 +283,9 @@ pub fn WorkStealingDeque(comptime T: type) type {
         
         pub fn getStats(self: *const Self) DequeStats {
             return .{
-                .pushes = self.stats.push_count.load(.monotonic),
-                .pops = self.stats.pop_count.load(.monotonic),
-                .steals = self.stats.steal_count.load(.monotonic),
+                .pushes = self.push_count.load(.monotonic),
+                .pops = self.pop_count.load(.monotonic),
+                .steals = self.steal_count.load(.monotonic),
                 .current_size = self.size(),
             };
         }
