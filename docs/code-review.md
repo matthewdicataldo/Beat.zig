@@ -387,7 +387,7 @@ Progress tracking for addressing identified issues, ordered from easiest to hard
 ### Performance Optimizations (Medium-High Effort)
 - [x] Add exponential back-off to work-stealing busy-wait loops (✅ IMPLEMENTED & COMPILES)
 - [x] Insert `std.Thread.yield` in `MpmcQueue.enqueue` spin loops (✅ IMPLEMENTED & COMPILES)
-- [ ] Implement free-list bitmap for `SlabAllocator.free` O(n) operations
+- [x] Implement O(1) slab lookup for `SlabAllocator.free` O(n) operations (✅ IMPLEMENTED & COMPILES)
 - [ ] Make heartbeat timing adaptive to observed queue lengths
 - [ ] Offload task profiling to dedicated low-priority worker thread
 - [ ] Implement hybrid LFU + age eviction policy for prediction cache
