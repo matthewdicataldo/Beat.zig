@@ -299,6 +299,10 @@ pub const SIMDWorkerRegistry = struct {
 
     pub fn deinit(self: *Self) void {
         self.allocator.free(self.worker_capabilities);
+        
+        // Clean up ISPC worker registry internal state
+        extern "ispc_free_worker_registry_state" fn ispc_free_worker_registry_state() void;
+        ispc_free_worker_registry_state();
     }
 
     pub fn getWorkerCapability(self: *Self, worker_id: usize) SIMDCapability {
@@ -440,6 +444,10 @@ pub const SIMDQueue = struct {
 
     pub fn deinit(self: *Self) void {
         self.allocator.free(self.queue);
+        
+        // Clean up ISPC queue optimization state
+        extern "ispc_free_simd_queue_state" fn ispc_free_simd_queue_state() void;
+        ispc_free_simd_queue_state();
     }
 
     /// ISPC-optimized batch enqueue
@@ -526,4 +534,14 @@ pub fn validateISPCPerformance(allocator: std.mem.Allocator) !void {
     
     _ = allocator;
     // Additional validation logic would go here
+}
+
+/// Global cleanup for all ISPC SIMD wrapper resources
+pub fn cleanupAllISPCResources() void {
+    // Clean up all ISPC-managed resources across all modules
+    extern "ispc_cleanup_all_simd_resources" fn ispc_cleanup_all_simd_resources() void;
+    extern "ispc_reset_simd_system" fn ispc_reset_simd_system() void;
+    
+    ispc_cleanup_all_simd_resources();
+    ispc_reset_simd_system();
 }

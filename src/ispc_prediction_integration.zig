@@ -198,6 +198,10 @@ pub const PredictionAccelerator = struct {
     
     pub fn deinit(self: *PredictionAccelerator) void {
         self.buffer_pool.deinit();
+        
+        // Clean up ISPC prediction acceleration state
+        extern fn ispc_free_prediction_acceleration_state() void;
+        ispc_free_prediction_acceleration_state();
     }
     
     /// Transparent fingerprint similarity computation with automatic ISPC acceleration
@@ -357,7 +361,7 @@ pub const PredictionAccelerator = struct {
         fingerprints_b: []const fingerprint.TaskFingerprint,
         results: []f32,
     ) !void {
-        if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
+        if (!ISPC_AVAILABLE) return error.ISPCUnavailable;
         
         // Convert fingerprints to u64 arrays for ISPC
         const count = @as(i32, @intCast(fingerprints_a.len));
@@ -396,7 +400,7 @@ pub const PredictionAccelerator = struct {
         fingerprints: []const fingerprint.TaskFingerprint,
         similarity_matrix: []f32,
     ) !void {
-        if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
+        if (!ISPC_AVAILABLE) return error.ISPCUnavailable;
         
         const count = @as(i32, @intCast(fingerprints.len));
         
@@ -427,7 +431,7 @@ pub const PredictionAccelerator = struct {
         filter_config: fingerprint.OneEuroConfig,
     ) !void {
         _ = self;
-        if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
+        if (!ISPC_AVAILABLE) return error.ISPCUnavailable;
         
         const count = @as(i32, @intCast(measurements.len));
         const dt_scale = 1.0 / 1_000_000_000.0; // ns to seconds
@@ -449,7 +453,7 @@ pub const PredictionAccelerator = struct {
         profiles: []const fingerprint.FingerprintRegistry.ProfileEntry,
         confidence_results: []intelligent_decision.MultiFactorConfidence,
     ) !void {
-        if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
+        if (!ISPC_AVAILABLE) return error.ISPCUnavailable;
         
         const count = @as(i32, @intCast(profiles.len));
         
@@ -489,7 +493,7 @@ pub const PredictionAccelerator = struct {
         task_numa_preference: i32,
     ) !void {
         _ = self;
-        if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
+        if (!ISPC_AVAILABLE) return error.ISPCUnavailable;
         
         const count = @as(i32, @intCast(worker_loads.len));
         
@@ -607,18 +611,32 @@ pub fn initGlobalAccelerator(allocator: std.mem.Allocator, config: PredictionAcc
     global_accelerator = PredictionAccelerator.init(allocator, config);
 }
 
-/// Deinitialize global accelerator (should be called on shutdown)
+/// Deinitialize global accelerator and all ISPC resources (should be called on shutdown)
 pub fn deinitGlobalAccelerator() void {
     if (global_accelerator) |*accel| {
         accel.deinit();
         global_accelerator = null;
     }
+    
+    // Clean up all ISPC runtime allocations
+    const ispc_integration = @import("ispc_integration.zig");
+    const ispc_optimized = @import("ispc_optimized.zig");
+    const ispc_simd_wrapper = @import("ispc_simd_wrapper.zig");
+    
+    ispc_integration.RuntimeManagement.cleanupISPCRuntime();
+    ispc_integration.RuntimeManagement.cleanupBatchAllocations();
+    ispc_optimized.OptimizedFingerprints.cleanup();
+    ispc_simd_wrapper.cleanupAllISPCResources();
+    
+    // Final cleanup of any remaining ISPC state
+    extern "ispc_final_cleanup" fn ispc_final_cleanup() void;
+    ispc_final_cleanup();
 }
 
 /// Get global accelerator instance
-pub fn getGlobalAccelerator() *PredictionAccelerator {
+pub fn getGlobalAccelerator() !*PredictionAccelerator {
     if (global_accelerator == null) {
-        @panic("Global ISPC accelerator not initialized. Call initGlobalAccelerator() with proper allocator first.");
+        return error.ISPCUnavailable;
     }
     return &global_accelerator.?;
 }
@@ -628,7 +646,11 @@ pub fn getGlobalAccelerator() *PredictionAccelerator {
 pub const TransparentAPI = struct {
     /// Enhanced fingerprint similarity with automatic ISPC acceleration
     pub fn enhancedSimilarity(fp_a: fingerprint.TaskFingerprint, fp_b: fingerprint.TaskFingerprint) f32 {
-        return getGlobalAccelerator().computeFingerprintSimilarity(fp_a, fp_b);
+        const accelerator = getGlobalAccelerator() catch {
+            // Fallback to native implementation when ISPC unavailable
+            return fp_a.similarity(fp_b);
+        };
+        return accelerator.computeFingerprintSimilarity(fp_a, fp_b);
     }
     
     /// Enhanced batch processing for simd_classifier
@@ -636,7 +658,21 @@ pub const TransparentAPI = struct {
         fingerprints: []const fingerprint.TaskFingerprint,
         similarity_matrix: []f32,
     ) void {
-        getGlobalAccelerator().computeSimilarityMatrix(fingerprints, similarity_matrix);
+        const accelerator = getGlobalAccelerator() catch {
+            // Fallback to native implementation when ISPC unavailable
+            const count = fingerprints.len;
+            for (fingerprints, 0..) |fp_i, i| {
+                for (fingerprints, 0..) |fp_j, j| {
+                    if (i == j) {
+                        similarity_matrix[i * count + j] = 1.0;
+                    } else {
+                        similarity_matrix[i * count + j] = fp_i.similarity(fp_j);
+                    }
+                }
+            }
+            return;
+        };
+        accelerator.computeSimilarityMatrix(fingerprints, similarity_matrix);
     }
     
     /// Enhanced One Euro Filter processing
@@ -647,14 +683,26 @@ pub const TransparentAPI = struct {
         results: []f32,
         config: fingerprint.OneEuroConfig,
     ) void {
-        getGlobalAccelerator().processOneEuroFilterBatch(measurements, timestamps, states, results, config);
+        const accelerator = getGlobalAccelerator() catch {
+            // Fallback to native implementation when ISPC unavailable
+            _ = config; // Configuration would be used in actual OneEuroFilter implementation
+            for (measurements, timestamps, states, results) |measurement, timestamp, *state, *result| {
+                result.* = fingerprint.OneEuroFilter.processValue(state, measurement, timestamp);
+            }
+            return;
+        };
+        accelerator.processOneEuroFilterBatch(measurements, timestamps, states, results, config);
     }
 };
 
 // Performance monitoring and diagnostics
 pub const DiagnosticsAPI = struct {
     pub fn getAccelerationStats() PredictionAccelerator.FallbackStats {
-        return getGlobalAccelerator().getStats();
+        const accelerator = getGlobalAccelerator() catch {
+            // Return empty stats when ISPC unavailable
+            return PredictionAccelerator.FallbackStats{};
+        };
+        return accelerator.getStats();
     }
     
     pub fn printPerformanceReport() void {

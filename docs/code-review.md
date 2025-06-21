@@ -372,17 +372,17 @@ Progress tracking for addressing identified issues, ordered from easiest to hard
 - [x] Audit and fix `ArrayList` leaks in `core.zig:ThreadPool.deinit`
 - [x] Store and join monitor thread handle in `memory_pressure.zig:stop`
 - [x] Fix cross-language memory leaks in ISPC wrapper modules
-- [ ] Implement proper `free*` helpers for ISPC runtime allocations
-- [ ] Fix Windows DLL handle leak in memory pressure monitoring
-- [ ] Add arena-backed lifetime management for `WorkerInfo` in worker selection
+- [x] Implement proper `free*` helpers for ISPC runtime allocations
+- [x] Fix Windows DLL handle leak in memory pressure monitoring
+- [x] Add arena-backed lifetime management for `WorkerInfo` in worker selection
 
 ### Error Handling Improvements (Medium Effort)
-- [ ] Replace silent fallbacks with explicit error logging using `EnhancedErrors.logEnhancedError`
-- [ ] Convert ISPC panic conditions to `error{ISPCUnavailable}` returns
-- [ ] Add error propagation in `simd_batch.zig:execute` kernel execution
-- [ ] Implement defensive null guards in scheduler memory pressure callbacks
-- [ ] Add early abort on irrecoverable hardware detection failures
-- [ ] Replace `WorkStealingDeque.pushBottom` assert with `!void` error return
+- [x] Replace silent fallbacks with explicit error logging using `EnhancedErrors.logEnhancedError`
+- [x] Convert ISPC panic conditions to `error{ISPCUnavailable}` returns
+- [x] Add error propagation in `simd_batch.zig:execute` kernel execution
+- [x] Implement defensive null guards in scheduler memory pressure callbacks
+- [x] Add early abort on irrecoverable hardware detection failures
+- [x] Replace `WorkStealingDeque.pushBottom` assert with `!void` error return
 
 ### Performance Optimizations (Medium-High Effort)
 - [ ] Add exponential back-off to work-stealing busy-wait loops

@@ -26,6 +26,10 @@ pub const FingerprintSoA = struct {
     pub fn deinit(self: *Self) void {
         self.allocator.free(self.low_bits);
         self.allocator.free(self.high_bits);
+        
+        // Clean up any ISPC-side caches associated with this SoA structure
+        extern "ispc_free_soa_fingerprint_cache" fn ispc_free_soa_fingerprint_cache() void;
+        ispc_free_soa_fingerprint_cache();
     }
     
     pub fn add(self: *Self, fingerprint: u128) void {
@@ -113,6 +117,10 @@ pub const ISPCPredictionSystem = struct {
         self.allocator.free(self.filtered_values);
         self.allocator.free(self.timestamps);
         self.allocator.free(self.confidence_scores);
+        
+        // Clean up ISPC One Euro Filter internal state
+        extern "ispc_free_one_euro_filter_state" fn ispc_free_one_euro_filter_state() void;
+        ispc_free_one_euro_filter_state();
     }
     
     pub fn initializeStates(self: *Self, min_cutoff: f32, beta: f32) void {
@@ -190,6 +198,7 @@ pub const OptimizedFingerprints = struct {
         std.debug.assert(fingerprints_a.count == fingerprints_b.count);
         
         const results = try allocator.alloc(f32, fingerprints_a.count);
+        errdefer allocator.free(results);
         
         ispc_compute_fingerprint_similarity_soa(
             fingerprints_a.low_bits.ptr,
@@ -201,6 +210,12 @@ pub const OptimizedFingerprints = struct {
         );
         
         return results;
+    }
+    
+    /// Clean up all ISPC fingerprint optimization caches
+    pub fn cleanup() void {
+        extern "ispc_free_optimized_fingerprint_caches" fn ispc_free_optimized_fingerprint_caches() void;
+        ispc_free_optimized_fingerprint_caches();
     }
     
     /// Compute full similarity matrix using SoA layout

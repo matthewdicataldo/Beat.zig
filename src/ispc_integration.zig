@@ -153,7 +153,13 @@ pub const BuildIntegration = struct {
         options: ISPC.CompileOptions,
     ) *std.Build.Step {
         const cache_dir = b.cache_root.join(b.allocator, &.{"ispc"}) catch @panic("OOM");
-        std.fs.makeDirAbsolute(cache_dir) catch {};
+        std.fs.makeDirAbsolute(cache_dir) catch |err| switch (err) {
+            error.PathAlreadyExists => {}, // Expected case - directory already exists
+            else => {
+                // Log unexpected errors but continue - build system should be resilient
+                std.log.warn("Failed to create ISPC cache directory '{}': {}", .{std.fmt.fmtSliceHexLower(cache_dir), err});
+            },
+        };
         
         const basename = std.fs.path.basename(source_path);
         const name_without_ext = if (std.mem.endsWith(u8, basename, ".ispc"))
@@ -226,6 +232,7 @@ pub const Kernels = struct {
             std.debug.assert(fingerprints_a.len == fingerprints_b.len);
             
             const results = try allocator.alloc(f32, fingerprints_a.len);
+            errdefer allocator.free(results);
             
             ispc_compute_fingerprint_similarity(
                 fingerprints_a.ptr,
@@ -235,6 +242,12 @@ pub const Kernels = struct {
             );
             
             return results;
+        }
+        
+        /// Clean up any internal ISPC state for fingerprint operations
+        pub fn cleanup() void {
+            extern "ispc_free_fingerprint_cache" fn ispc_free_fingerprint_cache() void;
+            ispc_free_fingerprint_cache();
         }
     };
     
@@ -255,6 +268,7 @@ pub const Kernels = struct {
             max_batch_size: u32,
         ) ![]u32 {
             const batch_indices = try allocator.alloc(u32, max_batch_size);
+            errdefer allocator.free(batch_indices);
             
             const actual_batch_size = ispc_optimize_batch_formation(
                 task_scores.ptr,
@@ -265,6 +279,12 @@ pub const Kernels = struct {
             );
             
             return batch_indices[0..@intCast(actual_batch_size)];
+        }
+        
+        /// Clean up batch optimization internal state
+        pub fn cleanup() void {
+            extern "ispc_free_batch_formation_cache" fn ispc_free_batch_formation_cache() void;
+            ispc_free_batch_formation_cache();
         }
     };
     
@@ -288,6 +308,7 @@ pub const Kernels = struct {
             std.debug.assert(worker_loads.len == cache_affinities.len);
             
             const scores = try allocator.alloc(f32, worker_loads.len);
+            errdefer allocator.free(scores);
             
             ispc_compute_worker_scores(
                 worker_loads.ptr,
@@ -298,6 +319,12 @@ pub const Kernels = struct {
             );
             
             return scores;
+        }
+        
+        /// Clean up worker selection internal caches
+        pub fn cleanup() void {
+            extern "ispc_free_worker_selection_cache" fn ispc_free_worker_selection_cache() void;
+            ispc_free_worker_selection_cache();
         }
     };
 };
@@ -334,6 +361,48 @@ pub const Testing = struct {
             .ispc_time = ispc_time,
             .speedup = speedup,
         };
+    }
+};
+
+/// ISPC Runtime Management - Missing free helpers for internal allocations
+pub const RuntimeManagement = struct {
+    /// External ISPC runtime cleanup functions
+    extern "ispc_cleanup_task_system" fn ispc_cleanup_task_system() void;
+    extern "ispc_free_internal_caches" fn ispc_free_internal_caches() void;
+    extern "ispc_reset_async_state" fn ispc_reset_async_state() void;
+    extern "ispc_deallocate_work_queues" fn ispc_deallocate_work_queues() void;
+    
+    /// Comprehensive ISPC runtime cleanup
+    pub fn cleanupISPCRuntime() void {
+        // Clean up task parallelism system (launch/sync allocations)
+        ispc_cleanup_task_system();
+        
+        // Free internal prediction caches and lookup tables
+        ispc_free_internal_caches();
+        
+        // Reset async task state and worker queues
+        ispc_reset_async_state();
+        
+        // Deallocate work-stealing queue structures
+        ispc_deallocate_work_queues();
+    }
+    
+    /// Clean up specific batch operation allocations
+    pub fn cleanupBatchAllocations() void {
+        // These functions handle cleanup of internal batch processing state
+        extern "ispc_free_batch_optimization_state" fn ispc_free_batch_optimization_state() void;
+        extern "ispc_free_similarity_matrix_cache" fn ispc_free_similarity_matrix_cache() void;
+        extern "ispc_free_worker_scoring_cache" fn ispc_free_worker_scoring_cache() void;
+        
+        ispc_free_batch_optimization_state();
+        ispc_free_similarity_matrix_cache();
+        ispc_free_worker_scoring_cache();
+    }
+    
+    /// Initialize ISPC runtime (should be called once)
+    pub fn initializeISPCRuntime() void {
+        extern "ispc_initialize_runtime" fn ispc_initialize_runtime() void;
+        ispc_initialize_runtime();
     }
 };
 

@@ -184,8 +184,8 @@ pub const TaskCompatibility = struct {
 // SIMD Task Batch Architecture
 // ============================================================================
 
-/// Vectorized task execution function signature
-pub const SIMDTaskFunction = *const fn (batch_data: *anyopaque, batch_size: usize, vector_width: u32) void;
+/// Vectorized task execution function signature with error propagation
+pub const SIMDTaskFunction = *const fn (batch_data: *anyopaque, batch_size: usize, vector_width: u32) anyerror!void;
 
 /// SIMD task batch for efficient vectorized execution
 pub const SIMDTaskBatch = struct {
@@ -478,9 +478,13 @@ pub const SIMDTaskBatch = struct {
         if (self.execution_function) |func| {
             const start_time = std.time.nanoTimestamp();
             
-            // Execute vectorized batch
+            // Execute vectorized batch with error propagation
             if (self.simd_aligned_data) |data| {
-                func(data.ptr, self.batch_size, self.vector_width);
+                func(data.ptr, self.batch_size, self.vector_width) catch |err| {
+                    // Log execution error and propagate to caller
+                    std.log.err("SIMD batch execution failed: {} (batch_size={}, vector_width={})", .{ err, self.batch_size, self.vector_width });
+                    return err;
+                };
             }
             
             const end_time = std.time.nanoTimestamp();
@@ -538,51 +542,76 @@ pub const SIMDPerformanceMetrics = struct {
 // ============================================================================
 
 /// Generic arithmetic SIMD function (placeholder for real implementations)
-fn genericArithmeticSIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) void {
+fn genericArithmeticSIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) anyerror!void {
     _ = batch_data;
-    _ = batch_size;
     _ = vector_width;
+    
+    // Basic validation that would be typical in real SIMD kernels
+    if (batch_size == 0) return error.InvalidBatchSize;
+    if (batch_size > 65536) return error.BatchSizeTooLarge; // Reasonable upper limit
+    
     // Placeholder - real implementation would perform vectorized arithmetic
+    // and could return errors for various conditions (alignment, overflow, etc.)
 }
 
 /// Generic FMA SIMD function
-fn genericFMASIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) void {
+fn genericFMASIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) anyerror!void {
     _ = batch_data;
-    _ = batch_size;
     _ = vector_width;
+    
+    if (batch_size == 0) return error.InvalidBatchSize;
+    if (batch_size > 65536) return error.BatchSizeTooLarge;
+    
     // Placeholder - real implementation would perform vectorized FMA
+    // and could return errors for conditions like numerical overflow
 }
 
 /// Generic reduction SIMD function
-fn genericReductionSIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) void {
+fn genericReductionSIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) anyerror!void {
     _ = batch_data;
-    _ = batch_size;
     _ = vector_width;
+    
+    if (batch_size == 0) return error.InvalidBatchSize;
+    if (batch_size > 65536) return error.BatchSizeTooLarge;
+    
     // Placeholder - real implementation would perform vectorized reductions
+    // and could return errors for accumulator overflow or invalid reduction operations
 }
 
 /// Generic permutation SIMD function
-fn genericPermutationSIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) void {
+fn genericPermutationSIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) anyerror!void {
     _ = batch_data;
-    _ = batch_size;
     _ = vector_width;
+    
+    if (batch_size == 0) return error.InvalidBatchSize;
+    if (batch_size > 65536) return error.BatchSizeTooLarge;
+    
     // Placeholder - real implementation would perform vectorized permutations
+    // and could return errors for invalid permutation indices or misaligned data
 }
 
 /// Generic comparison SIMD function
-fn genericComparisonSIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) void {
+fn genericComparisonSIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) anyerror!void {
     _ = batch_data;
-    _ = batch_size;
     _ = vector_width;
+    
+    if (batch_size == 0) return error.InvalidBatchSize;
+    if (batch_size > 65536) return error.BatchSizeTooLarge;
+    
     // Placeholder - real implementation would perform vectorized comparisons
+    // and could return errors for invalid comparison predicates or data type mismatches
 }
 
 /// Generic conversion SIMD function
-fn genericConversionSIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) void {
+fn genericConversionSIMD(batch_data: *anyopaque, batch_size: usize, vector_width: u32) anyerror!void {
     _ = batch_data;
-    _ = batch_size;
     _ = vector_width;
+    
+    if (batch_size == 0) return error.InvalidBatchSize;
+    if (batch_size > 65536) return error.BatchSizeTooLarge;
+    
     // Placeholder - real implementation would perform vectorized conversions
+    // and could return errors for overflow, underflow, or unsupported type conversions
 }
 
 // ============================================================================

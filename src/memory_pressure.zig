@@ -414,13 +414,56 @@ pub const MemoryPressureMonitor = struct {
         return std.fmt.parseInt(u64, value_str, 10) catch null;
     }
     
-    /// Read Windows memory information (placeholder - needs Windows API)
+    /// Read Windows memory information using Zig's built-in Windows API bindings
+    /// This avoids DLL handle leaks by using std.os.windows.kernel32.GlobalMemoryStatusEx
     fn readWindowsMemory(self: *MemoryPressureMonitor, metrics: *MemoryPressureMetrics) void {
         _ = self;
-        // TODO: Implement GlobalMemoryStatusEx() or GetPerformanceInfo()
-        // For now, use conservative estimates
-        metrics.memory_used_pct = 60.0;  // Assume moderate usage
-        metrics.memory_available_mb = 2048; // 2GB fallback
+        
+        if (builtin.os.tag != .windows) {
+            // Fallback for non-Windows platforms
+            metrics.memory_used_pct = 60.0;
+            metrics.memory_available_mb = 2048;
+            return;
+        }
+        
+        // Use Zig's built-in Windows API bindings - no DLL handle management required
+        var mem_status: std.os.windows.MEMORYSTATUSEX = undefined;
+        mem_status.dwLength = @sizeOf(std.os.windows.MEMORYSTATUSEX);
+        
+        // Call GlobalMemoryStatusEx through Zig's Windows API bindings
+        const result = std.os.windows.kernel32.GlobalMemoryStatusEx(&mem_status);
+        
+        if (result == 0) {
+            // API call failed, use conservative fallback estimates
+            std.log.debug("GlobalMemoryStatusEx failed, using fallback estimates", .{});
+            metrics.memory_used_pct = 60.0;
+            metrics.memory_available_mb = 2048;
+            return;
+        }
+        
+        // Calculate memory usage percentages from Windows API data
+        const total_memory = mem_status.ullTotalPhys;
+        const available_memory = mem_status.ullAvailPhys;
+        const used_memory = total_memory - available_memory;
+        
+        // Convert to percentages and MB
+        metrics.memory_used_pct = if (total_memory > 0) 
+            (@as(f32, @floatFromInt(used_memory)) / @as(f32, @floatFromInt(total_memory))) * 100.0
+        else 
+            0.0;
+        
+        metrics.memory_available_mb = available_memory / (1024 * 1024); // Convert bytes to MB
+        
+        // Handle virtual memory (swap) if available
+        const total_virtual = mem_status.ullTotalVirtual;
+        const available_virtual = mem_status.ullAvailVirtual;
+        
+        if (total_virtual > 0) {
+            const used_virtual = total_virtual - available_virtual;
+            metrics.swap_used_pct = (@as(f32, @floatFromInt(used_virtual)) / @as(f32, @floatFromInt(total_virtual))) * 100.0;
+        } else {
+            metrics.swap_used_pct = 0.0;
+        }
     }
     
     /// Read macOS memory information (placeholder - needs macOS APIs)

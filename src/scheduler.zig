@@ -241,16 +241,26 @@ pub const Scheduler = struct {
     
     /// Handle memory pressure change (called by heartbeat loop)
     fn handleMemoryPressureChange(self: *Scheduler, level: memory_pressure.MemoryPressureLevel, metrics: *const memory_pressure.MemoryPressureMetrics) void {
+        // Additional defensive check - ensure metrics pointer is valid and metrics are current
+        if (metrics.last_update_ns == 0) {
+            std.log.warn("Scheduler: handleMemoryPressureChange called with invalid metrics, ignoring", .{});
+            return;
+        }
+        
         // Record adaptation event
         _ = self.pressure_adaptations.fetchAdd(1, .monotonic);
         
-        // Log significant pressure changes
+        // Log significant pressure changes with defensive value checks
         if (builtin.mode == .Debug) {
+            // Guard against invalid metric values that could cause format issues
+            const safe_some_avg10 = if (std.math.isNan(metrics.some_avg10) or std.math.isInf(metrics.some_avg10)) 0.0 else metrics.some_avg10;
+            const safe_mem_used_pct = if (std.math.isNan(metrics.memory_used_pct) or std.math.isInf(metrics.memory_used_pct)) 0.0 else metrics.memory_used_pct;
+            
             std.debug.print("Scheduler: Memory pressure changed to {s} (some_avg10: {:.1}%, mem_used: {:.1}%)\n", 
-                .{ @tagName(level), metrics.some_avg10, metrics.memory_used_pct });
+                .{ @tagName(level), safe_some_avg10, safe_mem_used_pct });
         }
         
-        // Trigger registered callbacks
+        // Trigger registered callbacks with validated metrics
         self.memory_pressure_callbacks.triggerCallbacks(level, metrics);
         
         // Built-in adaptive behaviors based on pressure level
@@ -309,8 +319,17 @@ pub const Scheduler = struct {
                 // Only trigger handler if pressure level changed or on significant updates
                 if (current_level != previous_pressure_level) {
                     const metrics = monitor.getCurrentMetrics();
-                    self.handleMemoryPressureChange(current_level, &metrics);
-                    previous_pressure_level = current_level;
+                    
+                    // Defensive null guards for memory pressure metrics
+                    if (metrics.last_update_ns > 0) {
+                        // Metrics are valid - safe to proceed with callback
+                        self.handleMemoryPressureChange(current_level, &metrics);
+                        previous_pressure_level = current_level;
+                    } else {
+                        // Metrics are stale or invalid - skip callback but update level to prevent spam
+                        std.log.debug("Scheduler: Skipping memory pressure callback due to invalid metrics", .{});
+                        previous_pressure_level = current_level;
+                    }
                     
                     // Update timestamp of last pressure check
                     const current_time = @as(u64, @intCast(std.time.nanoTimestamp()));

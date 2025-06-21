@@ -6,6 +6,7 @@ const continuation_predictive = @import("continuation_predictive.zig");
 const advanced_worker_selection = @import("advanced_worker_selection.zig");
 const topology = @import("topology.zig");
 const fingerprint = @import("fingerprint.zig");
+const enhanced_errors = @import("enhanced_errors.zig");
 
 // ============================================================================
 // Advanced Worker Selection for Continuation Stealing (Phase 1 Integration)
@@ -442,7 +443,10 @@ pub const ContinuationLocalityTracker = struct {
         // Update locality score based on placement diversity
         self.updateLocalityScore(&entry);
         
-        self.locality_map.put(hash, entry) catch {};
+        self.locality_map.put(hash, entry) catch |err| {
+            enhanced_errors.logEnhancedError(@TypeOf(err), err, "Failed to record continuation placement in locality tracker");
+            std.log.debug("Failed to update locality map for continuation hash {}: {}", .{hash, err});
+        };
     }
     
     pub fn getLocalityScore(self: *ContinuationLocalityTracker, cont: *continuation.Continuation) f32 {
@@ -503,7 +507,10 @@ pub const NumaPreferenceCache = struct {
     
     pub fn updatePreference(self: *NumaPreferenceCache, hash: u64, numa_node: u32, worker_id: u32) void {
         if (self.preference_map.count() >= self.max_entries) {
-            self.evictOldEntries() catch {};
+            self.evictOldEntries() catch |err| {
+                enhanced_errors.logEnhancedError(@TypeOf(err), err, "Failed to evict old entries from NUMA preference cache");
+                std.log.warn("NUMA preference cache eviction failed, continuing with full cache: {}", .{err});
+            };
         }
         
         const entry = PreferenceEntry{
@@ -512,7 +519,10 @@ pub const NumaPreferenceCache = struct {
             .timestamp = @as(u64, @intCast(std.time.nanoTimestamp())),
         };
         
-        self.preference_map.put(hash, entry) catch {};
+        self.preference_map.put(hash, entry) catch |err| {
+            enhanced_errors.logEnhancedError(@TypeOf(err), err, "Failed to update NUMA preference cache");
+            std.log.debug("Failed to update NUMA preference for hash {}: {}", .{hash, err});
+        };
     }
     
     pub fn getPreference(self: *NumaPreferenceCache, hash: u64) ?u32 {

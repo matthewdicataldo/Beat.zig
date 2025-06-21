@@ -5,6 +5,7 @@ const continuation_unified = @import("continuation_unified.zig");
 const continuation_simd = @import("continuation_simd.zig");
 const continuation_predictive = @import("continuation_predictive.zig");
 const advanced_worker_selection = @import("advanced_worker_selection.zig");
+const enhanced_errors = @import("enhanced_errors.zig");
 
 // ============================================================================
 // Worker Selection Compatibility Layer
@@ -155,12 +156,17 @@ pub const ContinuationLocalityTracker = struct {
     
     pub fn recordPlacement(self: *ContinuationLocalityTracker, cont: *continuation.Continuation, worker_id: u32) void {
         // Route through unified system
-        self.unified_manager.updateWithResults(cont, 1000000, worker_id) catch {}; // Default execution time for compatibility
+        self.unified_manager.updateWithResults(cont, 1000000, worker_id) catch |err| {
+            enhanced_errors.logEnhancedError(@TypeOf(err), err, "Failed to record continuation placement in compatibility layer");
+            std.log.debug("Failed to update unified manager with continuation results: {}", .{err});
+        }; // Default execution time for compatibility
     }
     
     pub fn getLocalityScore(self: *ContinuationLocalityTracker, cont: *continuation.Continuation) f32 {
         // Get locality score from unified analysis
-        const analysis = self.unified_manager.getAnalysis(cont) catch {
+        const analysis = self.unified_manager.getAnalysis(cont) catch |err| {
+            enhanced_errors.logEnhancedError(@TypeOf(err), err, "Failed to get analysis from unified manager");
+            std.log.debug("Using default locality score due to analysis error: {}", .{err});
             return 0.5; // Default for compatibility
         };
         

@@ -10,6 +10,7 @@ pub const scheduler = @import("scheduler.zig");
 pub const pcall = @import("pcall.zig");
 pub const coz = @import("coz.zig");
 pub const testing = @import("testing.zig");
+pub const ispc_cleanup = @import("ispc_cleanup_coordinator.zig");
 // Use smart build configuration that handles dependency scenarios
 pub const build_opts = @import("build_opts_new.zig");
 pub const comptime_work = @import("comptime_work.zig");
@@ -378,6 +379,10 @@ pub const ThreadPool = struct {
     // Unified continuation management system (Consolidation)
     unified_continuation_manager: ?*continuation_unified.UnifiedContinuationManager = null,
     
+    // Arena allocator for WorkerInfo lifetime management
+    // Prevents use-after-free issues in worker selection compatibility layer
+    worker_info_arena: std.heap.ArenaAllocator,
+    
     const Self = @This();
     
     pub const Worker = struct {
@@ -491,6 +496,42 @@ pub const ThreadPool = struct {
         
         if (actual_config.enable_topology_aware) {
             detected_topology = topology.detectTopology(allocator) catch |err| blk: {
+                // Check for irrecoverable topology detection failures
+                const is_irrecoverable = switch (err) {
+                    error.OutOfMemory => true,         // Cannot allocate for basic topology detection
+                    error.SystemResources => true,     // System resource exhaustion
+                    error.PermissionDenied => true,    // Cannot access system information
+                    error.Unexpected => true,          // Unexpected system errors
+                    else => false,                      // Other errors are recoverable (e.g., UnsupportedPlatform)
+                };
+                
+                if (is_irrecoverable) {
+                    enhanced_errors.logEnhancedError(
+                        enhanced_errors.ConfigError, 
+                        enhanced_errors.ConfigError.HardwareDetectionFailed, 
+                        "Critical topology detection failure"
+                    );
+                    std.log.err(
+                        \\
+                        \\🚨 CRITICAL: Irrecoverable topology detection failure
+                        \\   Error: {}
+                        \\   This indicates a serious system issue that prevents
+                        \\   safe initialization of topology-aware features.
+                        \\
+                        \\💡 This suggests system-level problems that may affect
+                        \\   overall thread pool reliability. Aborting initialization.
+                        \\
+                        \\🔧 Solutions:
+                        \\   • Check available system memory
+                        \\   • Verify process permissions for system information access
+                        \\   • Use explicit non-topology configuration as workaround:
+                        \\     Config{{ .enable_topology_aware = false, .enable_numa_aware = false }}
+                        \\
+                    , .{err});
+                    return err; // Early abort for critical failures
+                }
+                
+                // Recoverable error - disable topology features and continue
                 std.log.warn(
                     \\
                     \\⚠️  Topology detection failed: {}
@@ -514,9 +555,47 @@ pub const ThreadPool = struct {
             }
         }
         
-        // Fallback worker count with enhanced error reporting
+        // Fallback worker count with enhanced error reporting and early abort for critical failures
         if (actual_config.num_workers == null) {
-            actual_config.num_workers = std.Thread.getCpuCount() catch blk: {
+            actual_config.num_workers = std.Thread.getCpuCount() catch |err| blk: {
+                // Check for irrecoverable hardware detection failures that indicate deeper system issues
+                const is_irrecoverable = switch (err) {
+                    error.SystemResources => true,     // System resource exhaustion
+                    error.PermissionDenied => true,    // Security restrictions preventing basic queries
+                    error.Unexpected => true,          // Unexpected system errors
+                    else => false,                      // Other errors are recoverable
+                };
+                
+                if (is_irrecoverable) {
+                    enhanced_errors.logEnhancedError(
+                        enhanced_errors.ConfigError, 
+                        enhanced_errors.ConfigError.HardwareDetectionFailed, 
+                        "Critical hardware detection failure - system may be compromised"
+                    );
+                    std.log.err(
+                        \\
+                        \\🚨 CRITICAL: Irrecoverable hardware detection failure
+                        \\   Error: {}
+                        \\   This indicates a serious system issue that prevents
+                        \\   safe operation. Cannot continue with thread pool initialization.
+                        \\
+                        \\💡 Possible causes:
+                        \\   • System resource exhaustion
+                        \\   • Security policy restrictions  
+                        \\   • Corrupted system information
+                        \\   • Hardware or kernel malfunction
+                        \\
+                        \\🔧 Solutions:
+                        \\   • Check system resource availability
+                        \\   • Verify security permissions
+                        \\   • Restart the system if hardware issues suspected
+                        \\   • Use explicit worker count as workaround: Config{{ .num_workers = N }}
+                        \\
+                    , .{err});
+                    return err; // Early abort - cannot safely continue
+                }
+                
+                // Recoverable error - use enhanced fallback logic
                 enhanced_errors.logEnhancedError(
                     enhanced_errors.ConfigError, 
                     enhanced_errors.ConfigError.HardwareDetectionFailed, 
@@ -541,6 +620,7 @@ pub const ThreadPool = struct {
             .running = std.atomic.Value(bool).init(true),
             .stats = .{},
             .topology = detected_topology,
+            .worker_info_arena = std.heap.ArenaAllocator.init(allocator),
         };
         
         // Initialize optional subsystems
@@ -664,7 +744,10 @@ pub const ThreadPool = struct {
             // Set CPU affinity if available
             if (worker.cpu_id) |cpu_id| {
                 if (self.topology != null) {
-                    topology.setThreadAffinity(worker.thread, &[_]u32{cpu_id}) catch {};
+                    topology.setThreadAffinity(worker.thread, &[_]u32{cpu_id}) catch |err| {
+                        enhanced_errors.logEnhancedError(@TypeOf(err), err, "Failed to set CPU affinity for worker thread");
+                        std.log.debug("Worker {d}: Failed to set CPU affinity to core {d}: {}", .{worker.id, cpu_id, err});
+                    };
                 }
             }
         }
@@ -672,6 +755,9 @@ pub const ThreadPool = struct {
         // Initialize ISPC acceleration for transparent performance enhancement
         // This provides maximum out-of-the-box performance with zero API changes
         fingerprint_enhanced.AutoAcceleration.init();
+        
+        // Initialize ISPC cleanup coordinator to prevent memory leaks
+        ispc_cleanup.initGlobalCleanupCoordinator(allocator);
         
         return self;
     }
@@ -744,6 +830,13 @@ pub const ThreadPool = struct {
             manager.deinit();
             self.allocator.destroy(manager);
         }
+        
+        // Clean up all ISPC runtime allocations before final deallocation
+        // This prevents cross-language memory leaks from ISPC kernels
+        ispc_cleanup.cleanupAllISPCResources(self.allocator);
+        
+        // Clean up WorkerInfo arena allocator
+        self.worker_info_arena.deinit();
         
         self.allocator.free(self.workers);
         self.allocator.destroy(self);
@@ -917,8 +1010,10 @@ pub const ThreadPool = struct {
         
         // Use advanced worker selection if available, otherwise fall back to round-robin
         if (self.continuation_worker_selector) |selector| {
-            worker_id = selector.selectWorkerForContinuation(cont, self, simd_class, prediction) catch blk: {
-                // Fallback to round-robin on error
+            worker_id = selector.selectWorkerForContinuation(cont, self, simd_class, prediction) catch |err| blk: {
+                // Log error and fallback to round-robin
+                enhanced_errors.logEnhancedError(@TypeOf(err), err, "Advanced continuation worker selection failed");
+                std.log.debug("Falling back to round-robin worker selection due to error: {}", .{err});
                 const submission_count = self.stats.hot.tasks_submitted.load(.monotonic);
                 break :blk @intCast(submission_count % self.workers.len);
             };
@@ -1036,26 +1131,27 @@ pub const ThreadPool = struct {
                 mutable_task.creation_timestamp = @intCast(std.time.nanoTimestamp());
             }
             
-            // Create worker info array for decision making
-            var worker_infos = std.ArrayList(intelligent_decision.WorkerInfo).init(self.allocator);
-            defer worker_infos.deinit();
+            // Create worker info array for decision making using arena allocator for proper lifetime management
+            // Reset arena to prevent memory growth while ensuring WorkerInfo structs remain valid during selection
+            _ = self.worker_info_arena.reset(.retain_capacity);
+            const arena_allocator = self.worker_info_arena.allocator();
+            
+            const worker_infos = arena_allocator.alloc(intelligent_decision.WorkerInfo, self.workers.len) catch {
+                // Fallback to legacy selection on allocation failure
+                return self.selectWorkerLegacy(task);
+            };
             
             for (self.workers, 0..) |*worker, i| {
-                const worker_info = intelligent_decision.WorkerInfo{
+                worker_infos[i] = intelligent_decision.WorkerInfo{
                     .id = worker.id,
                     .numa_node = worker.numa_node,
                     .queue_size = self.getWorkerQueueSize(i),
                     .max_queue_size = 1024, // Default max queue size
                 };
-                
-                worker_infos.append(worker_info) catch {
-                    // Fallback to legacy selection on allocation failure
-                    return self.selectWorkerLegacy(task);
-                };
             }
             
             // Use advanced multi-criteria optimization
-            const decision = selector.selectWorker(&task, worker_infos.items, if (self.topology) |*topo| topo else null) catch {
+            const decision = selector.selectWorker(&task, worker_infos, if (self.topology) |*topo| topo else null) catch {
                 // Fallback to legacy selection on error
                 return self.selectWorkerLegacy(task);
             };
@@ -1081,28 +1177,29 @@ pub const ThreadPool = struct {
                 mutable_task.creation_timestamp = @intCast(std.time.nanoTimestamp());
             }
             
-            // Create worker info array for decision making
-            var worker_infos = std.ArrayList(intelligent_decision.WorkerInfo).init(self.allocator);
-            defer worker_infos.deinit();
+            // Create worker info array for decision making using arena allocator for proper lifetime management
+            // Reset arena to prevent memory growth while ensuring WorkerInfo structs remain valid during selection
+            _ = self.worker_info_arena.reset(.retain_capacity);
+            const arena_allocator = self.worker_info_arena.allocator();
+            
+            const worker_infos = arena_allocator.alloc(intelligent_decision.WorkerInfo, self.workers.len) catch {
+                // Fallback to legacy selection on allocation failure
+                return self.selectWorkerLegacy(task);
+            };
             
             for (self.workers, 0..) |*worker, i| {
-                const worker_info = intelligent_decision.WorkerInfo{
+                worker_infos[i] = intelligent_decision.WorkerInfo{
                     .id = worker.id,
                     .numa_node = worker.numa_node,
                     .queue_size = self.getWorkerQueueSize(i),
                     .max_queue_size = 1024, // Default max queue size
-                };
-                
-                worker_infos.append(worker_info) catch {
-                    // Fallback to legacy selection on allocation failure
-                    return self.selectWorkerLegacy(task);
                 };
             }
             
             // Make intelligent scheduling decision
             const decision = framework.makeSchedulingDecision(
                 &task,
-                worker_infos.items,
+                worker_infos,
                 self.topology
             );
             
@@ -1272,7 +1369,10 @@ pub const ThreadPool = struct {
                         
                         // Register completion with continuation registry if available
                         if (worker.continuation_registry) |registry| {
-                            registry.completeContinuation(cont) catch {};
+                            registry.completeContinuation(cont) catch |err| {
+                                enhanced_errors.logEnhancedError(@TypeOf(err), err, "Failed to register continuation completion");
+                                std.log.warn("Worker {d}: Failed to register continuation completion: {}", .{worker.id, err});
+                            };
                         }
                     },
                 }
@@ -1581,4 +1681,16 @@ pub fn createTestPool(allocator: std.mem.Allocator) !*ThreadPool {
 pub fn createBenchmarkPool(allocator: std.mem.Allocator) !*ThreadPool {
     const benchmark_config = build_opts.getBenchmarkConfig();
     return ThreadPool.init(allocator, benchmark_config);
+}
+
+/// Manually clean up all ISPC runtime allocations
+/// This is automatically called during ThreadPool.deinit(), but can be called manually if needed
+pub fn cleanupISPCRuntime(allocator: std.mem.Allocator) void {
+    ispc_cleanup.cleanupAllISPCResources(allocator);
+}
+
+/// Emergency cleanup for ISPC runtime (forces cleanup even if already called)
+/// Use this only in exceptional circumstances (e.g., error recovery)
+pub fn emergencyCleanupISPCRuntime(allocator: std.mem.Allocator) void {
+    ispc_cleanup.emergencyCleanupAllISPCResources(allocator);
 }
