@@ -22,6 +22,7 @@ pub const intelligent_decision = @import("intelligent_decision.zig");
 pub const predictive_accounting = @import("predictive_accounting.zig");
 pub const advanced_worker_selection = @import("advanced_worker_selection.zig");
 pub const memory_pressure = @import("memory_pressure.zig");
+pub const profiling_thread = @import("profiling_thread.zig");
 pub const simd = @import("simd.zig");
 pub const simd_batch = @import("simd_batch.zig");
 pub const simd_queue = @import("simd_queue.zig");
@@ -367,6 +368,9 @@ pub const ThreadPool = struct {
     fingerprint_registry: ?*fingerprint.FingerprintRegistry = null,
     advanced_selector: ?*advanced_worker_selection.AdvancedWorkerSelector = null,
     
+    // Dedicated profiling thread for off-critical-path performance analysis
+    profiling_thread: ?*profiling_thread.ProfilingThread = null,
+    
     // SIMD-enhanced continuation processing (Phase 1 integration)
     continuation_simd_classifier: ?*continuation_simd.ContinuationClassifier = null,
     
@@ -709,6 +713,16 @@ pub const ThreadPool = struct {
             self.scheduler = try scheduler.Scheduler.init(allocator, &actual_config);
         }
         
+        // Initialize dedicated profiling thread for off-critical-path performance analysis
+        if (actual_config.enable_statistics or actual_config.enable_predictive) {
+            self.profiling_thread = try allocator.create(profiling_thread.ProfilingThread);
+            self.profiling_thread.?.* = profiling_thread.ProfilingThread.init(allocator);
+            try self.profiling_thread.?.start();
+            
+            // Initialize global profiling thread for cross-module access
+            try profiling_thread.initGlobalProfilingThread(allocator);
+        }
+        
         if (actual_config.enable_lock_free) {
             const pool = memory.TaskPool.init(allocator);
             self.memory_pool = try allocator.create(memory.TaskPool);
@@ -891,6 +905,15 @@ pub const ThreadPool = struct {
         if (self.advanced_selector) |selector| {
             self.allocator.destroy(selector);
         }
+        
+        // Cleanup dedicated profiling thread
+        if (self.profiling_thread) |prof_thread| {
+            prof_thread.deinit();
+            self.allocator.destroy(prof_thread);
+        }
+        
+        // Cleanup global profiling thread
+        profiling_thread.deinitGlobalProfilingThread();
         
         if (self.continuation_simd_classifier) |classifier| {
             classifier.deinit();

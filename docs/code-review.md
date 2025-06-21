@@ -389,7 +389,7 @@ Progress tracking for addressing identified issues, ordered from easiest to hard
 - [x] Insert `std.Thread.yield` in `MpmcQueue.enqueue` spin loops (✅ IMPLEMENTED & COMPILES)
 - [x] Implement O(1) slab lookup for `SlabAllocator.free` O(n) operations (✅ IMPLEMENTED & COMPILES)
 - [x] Make heartbeat timing adaptive to observed queue lengths (✅ IMPLEMENTED & COMPILES)
-- [ ] Offload task profiling to dedicated low-priority worker thread
+- [x] Offload task profiling to dedicated low-priority worker thread (✅ IMPLEMENTED & COMPILES)
 - [ ] Implement hybrid LFU + age eviction policy for prediction cache
 
 ### Concurrency Safety (High Effort)

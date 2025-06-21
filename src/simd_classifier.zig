@@ -4,6 +4,7 @@ const core = @import("core.zig");
 const simd = @import("simd.zig");
 const simd_batch = @import("simd_batch.zig");
 const fingerprint = @import("fingerprint.zig");
+const profiling_thread = @import("profiling_thread.zig");
 
 // SIMD Task Classification and Batch Formation System for Beat.zig (Phase 5.2.3)
 //
@@ -790,10 +791,33 @@ pub const ClassifiedTask = struct {
     pub fn fromTask(task: core.Task, enable_profiling: bool) !ClassifiedTask {
         const static_analysis = StaticAnalysis.analyzeTask(&task);
         
-        const dynamic_profile = if (enable_profiling) 
-            try DynamicProfile.profileTask(&task, 3) // Quick profiling
-        else 
-            null;
+        // PERFORMANCE OPTIMIZATION: Use asynchronous profiling to avoid blocking critical path
+        var dynamic_profile: ?DynamicProfile = null;
+        
+        if (enable_profiling) {
+            // Check if we have a cached profile from previous async profiling
+            const task_hash = calculateTaskHash(&task);
+            
+            if (profiling_thread.getGlobalProfilingThread()) |prof_thread| {
+                if (prof_thread.getTaskProfile(task_hash)) |cached_profile| {
+                    // Use cached profiling data from previous executions (O(1) lookup)
+                    dynamic_profile = DynamicProfile{
+                        .execution_time_ns = cached_profile.getAverageExecutionTime(),
+                        .execution_variance = cached_profile.getExecutionVariance(),
+                        .cache_miss_rate = 0.1, // Conservative estimate
+                        .branch_miss_rate = 0.05, // Conservative estimate 
+                        .memory_stall_cycles = @as(u64, @intFromFloat(cached_profile.getExecutionVariance() * 0.1)),
+                        .instruction_count = cached_profile.getAverageExecutionTime() / 10, // Rough estimate
+                        .vectorization_efficiency = 0.7, // Default estimate
+                    };
+                } else {
+                    // No cached profile - submit async profiling request (non-blocking O(1))
+                    _ = prof_thread.requestDynamicProfiling(task, 3, asyncProfilingCallback);
+                    // Continue with static analysis only for immediate classification
+                    dynamic_profile = null;
+                }
+            }
+        }
             
         const feature_vector = if (dynamic_profile) |profile|
             TaskFeatureVector.fromAnalysis(static_analysis, profile)
@@ -812,6 +836,27 @@ pub const ClassifiedTask = struct {
             .preferred_batch_size = classification.getRecommendedBatchSize(),
             .compatibility_radius = calculateCompatibilityRadius(feature_vector),
         };
+    }
+    
+    // ========================================================================
+    // Asynchronous Profiling Support (Performance Optimization)
+    // ========================================================================
+    
+    /// Calculate a hash for a task to identify it for profiling cache
+    fn calculateTaskHash(task: *const core.Task) u64 {
+        const func_addr = @intFromPtr(task.func);
+        const data_addr = @intFromPtr(task.data);
+        // Simple hash combining function pointer and data pointer
+        return func_addr ^ data_addr;
+    }
+    
+    /// Async profiling callback - called when profiling completes off critical path
+    fn asyncProfilingCallback(profile: *DynamicProfile) void {
+        // Profile is now available for future task classifications
+        // This runs asynchronously on the profiling thread
+        
+        // Could trigger ML model updates, SIMD recommendation adjustments, etc.
+        std.log.debug("Async profiling completed for task (exec_time: {}ns)", .{profile.execution_time_ns});
     }
     
     /// Check compatibility with another classified task
