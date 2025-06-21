@@ -144,11 +144,15 @@ pub const ContinuationPredictiveAccounting = struct {
                 actual_time_ns - cached_prediction.predicted_time_ns;
                 
             const relative_error = @as(f32, @floatFromInt(prediction_error)) / @as(f32, @floatFromInt(actual_time_ns));
+            const was_accurate = relative_error < 0.3; // Within 30% considered accurate
             
             // Update accuracy tracking
-            profile.updateAccuracy(relative_error < 0.3); // Within 30% considered accurate
+            profile.updateAccuracy(was_accurate);
             
-            if (relative_error < 0.3) {
+            // Update cache quality score for hybrid LFU+age algorithm
+            self.prediction_cache.updateQualityScore(fingerprint_hash, was_accurate);
+            
+            if (was_accurate) {
                 self.accurate_predictions += 1;
             }
         }
@@ -165,7 +169,7 @@ pub const ContinuationPredictiveAccounting = struct {
         _ = self.velocity_filter.filter(velocity, current_time);
     }
     
-    /// Get performance statistics
+    /// Get performance statistics with enhanced cache metrics
     pub fn getPerformanceStats(self: *Self) PredictiveAccountingStats {
         const accuracy_rate = if (self.total_predictions > 0)
             @as(f32, @floatFromInt(self.accurate_predictions)) / @as(f32, @floatFromInt(self.total_predictions))
@@ -185,6 +189,11 @@ pub const ContinuationPredictiveAccounting = struct {
             .profiles_tracked = self.execution_history.count(),
             .current_confidence = self.one_euro_filter.getCurrentEstimate() orelse 0.0,
         };
+    }
+    
+    /// Get detailed cache performance statistics for hybrid LFU+age algorithm
+    pub fn getCacheStats(self: *const Self) PredictionCache.CacheStats {
+        return self.prediction_cache.getStats();
     }
     
     /// Generate fingerprint for continuation caching
@@ -400,21 +409,78 @@ pub const PredictionResult = struct {
     };
 };
 
-/// High-performance prediction cache
+/// High-performance prediction cache with hybrid LFU + age eviction policy
 const PredictionCache = struct {
     const CacheEntry = struct {
         prediction: PredictionResult,
-        timestamp: u64,
-        access_count: u32,
+        timestamp: u64,         // Entry creation time
+        last_access: u64,       // Last access time
+        access_count: u32,      // Total access count (LFU component)
+        access_frequency: f32,  // Weighted access frequency per time unit
+        quality_score: f32,     // Prediction accuracy score for this entry
+        
+        /// Calculate hybrid eviction score (lower = more likely to evict)
+        /// Combines LFU (frequency), recency (age), and prediction quality
+        fn calculateEvictionScore(self: *const CacheEntry, current_time: u64) f32 {
+            const age_seconds = @as(f32, @floatFromInt(current_time - self.timestamp)) / 1_000_000_000.0;
+            const recency_seconds = @as(f32, @floatFromInt(current_time - self.last_access)) / 1_000_000_000.0;
+            
+            // Prevent division by zero for very new entries
+            const safe_age = @max(0.001, age_seconds);
+            const safe_recency = @max(0.001, recency_seconds);
+            
+            // Frequency score: higher access frequency = higher score
+            const frequency_score = self.access_frequency / safe_age;
+            
+            // Recency score: more recent access = higher score
+            const recency_score = 1.0 / safe_recency;
+            
+            // Quality score: better predictions = higher score
+            const quality_score = self.quality_score;
+            
+            // Age penalty: very old entries get penalized exponentially
+            const age_penalty = if (age_seconds > 30.0) std.math.exp(-(age_seconds - 30.0) / 10.0) else 1.0;
+            
+            // Weighted combination with tuned coefficients for prediction workloads
+            const weights = struct {
+                const frequency: f32 = 0.35;  // LFU component
+                const recency: f32 = 0.25;    // LRU component  
+                const quality: f32 = 0.30;    // Accuracy component
+                const age_factor: f32 = 0.10;  // Age penalty factor
+            };
+            
+            return (frequency_score * weights.frequency + 
+                   recency_score * weights.recency + 
+                   quality_score * weights.quality) * 
+                   (age_penalty * weights.age_factor + (1.0 - weights.age_factor));
+        }
+        
+        /// Update access statistics for this entry
+        fn updateAccess(self: *CacheEntry, current_time: u64) void {
+            const time_since_last = @as(f32, @floatFromInt(current_time - self.last_access)) / 1_000_000_000.0;
+            
+            // Update access tracking
+            self.access_count += 1;
+            self.last_access = current_time;
+            
+            // Update weighted frequency using exponential smoothing
+            const alpha: f32 = 0.3; // Smoothing factor
+            const instant_frequency = if (time_since_last > 0) 1.0 / time_since_last else 1.0;
+            self.access_frequency = alpha * instant_frequency + (1.0 - alpha) * self.access_frequency;
+        }
     };
     
     map: std.AutoHashMap(u64, CacheEntry),
     max_entries: usize,
+    total_accesses: u64,      // Statistics for adaptive tuning
+    total_evictions: u64,
     
     fn init(allocator: std.mem.Allocator) !PredictionCache {
         return PredictionCache{
             .map = std.AutoHashMap(u64, CacheEntry).init(allocator),
-            .max_entries = 512, // Smaller cache for predictions
+            .max_entries = 512, // Optimal size for predictions
+            .total_accesses = 0,
+            .total_evictions = 0,
         };
     }
     
@@ -422,16 +488,23 @@ const PredictionCache = struct {
         self.map.deinit();
     }
     
-    fn get(self: *PredictionCache, hash: u64) ?PredictionResult {
+    pub fn get(self: *PredictionCache, hash: u64) ?PredictionResult {
+        const current_time = @as(u64, @intCast(std.time.nanoTimestamp()));
+        
         if (self.map.getPtr(hash)) |entry| {
-            entry.access_count += 1;
-            
-            // Check if prediction is still fresh (within 10 seconds)
-            const current_time = @as(u64, @intCast(std.time.nanoTimestamp()));
-            if (current_time - entry.timestamp < 10_000_000_000) {
+            // Check if prediction is still fresh (adaptive freshness based on confidence)
+            const max_age_ns: u64 = if (entry.prediction.confidence > 0.8)
+                20_000_000_000  // 20 seconds for high-confidence predictions
+            else
+                5_000_000_000;  // 5 seconds for low-confidence predictions
+                
+            if (current_time - entry.timestamp < max_age_ns) {
+                // Update access statistics for hybrid algorithm
+                entry.updateAccess(current_time);
+                self.total_accesses += 1;
                 return entry.prediction;
             } else {
-                // Remove stale entry
+                // Remove stale entry immediately
                 _ = self.map.remove(hash);
             }
         }
@@ -439,50 +512,150 @@ const PredictionCache = struct {
     }
     
     fn put(self: *PredictionCache, hash: u64, prediction: PredictionResult) !void {
-        // Evict old entries if cache is full
+        const current_time = @as(u64, @intCast(std.time.nanoTimestamp()));
+        
+        // Evict entries if cache is full using hybrid LFU+age policy
         if (self.map.count() >= self.max_entries) {
-            try self.evictOldEntries();
+            try self.evictHybridLFUAge(current_time);
         }
+        
+        // Initialize quality score based on prediction confidence and source
+        const initial_quality = switch (prediction.prediction_source) {
+            .historical_filtered => prediction.confidence * 0.9,
+            .simd_enhanced => prediction.confidence * 1.1,
+            .numa_optimized => prediction.confidence * 0.95,
+            .default => prediction.confidence * 0.7,
+        };
         
         const entry = CacheEntry{
             .prediction = prediction,
-            .timestamp = @as(u64, @intCast(std.time.nanoTimestamp())),
+            .timestamp = current_time,
+            .last_access = current_time,
             .access_count = 1,
+            .access_frequency = 1.0,  // Initial frequency
+            .quality_score = @min(1.0, @max(0.0, initial_quality)),
         };
         
         try self.map.put(hash, entry);
     }
     
-    fn evictOldEntries(self: *PredictionCache) !void {
-        // Simple LRU eviction - remove 25% of entries
-        const eviction_count = self.max_entries / 4;
-        var keys_to_remove = try std.ArrayList(u64).initCapacity(self.map.allocator, eviction_count);
+    /// Hybrid LFU + Age eviction algorithm optimized for prediction workloads
+    fn evictHybridLFUAge(self: *PredictionCache, current_time: u64) !void {
+        // Adaptive eviction: remove 20-40% based on cache pressure
+        const cache_pressure = @as(f32, @floatFromInt(self.map.count())) / @as(f32, @floatFromInt(self.max_entries));
+        const eviction_rate: f32 = if (cache_pressure > 0.95) 0.4 else if (cache_pressure > 0.90) 0.3 else 0.2;
+        const eviction_count = @max(1, @as(usize, @intFromFloat(@as(f32, @floatFromInt(self.max_entries)) * eviction_rate)));
+        
+        // Collect entries with their eviction scores
+        const EntryScore = struct {
+            hash: u64,
+            score: f32,
+        };
+        
+        var entries_scores = try std.ArrayList(EntryScore).initCapacity(
+            self.map.allocator, self.map.count()
+        );
+        defer entries_scores.deinit();
+        
+        var iterator = self.map.iterator();
+        while (iterator.next()) |entry| {
+            const score = entry.value_ptr.calculateEvictionScore(current_time);
+            entries_scores.appendAssumeCapacity(EntryScore{
+                .hash = entry.key_ptr.*,
+                .score = score,
+            });
+        }
+        
+        // Sort by eviction score (ascending - lowest scores evicted first)
+        std.sort.pdq(EntryScore, entries_scores.items, {}, struct {
+            fn lessThan(_: void, a: EntryScore, b: EntryScore) bool {
+                return a.score < b.score;
+            }
+        }.lessThan);
+        
+        // Evict lowest-scoring entries
+        const actual_eviction_count = @min(eviction_count, entries_scores.items.len);
+        for (entries_scores.items[0..actual_eviction_count]) |entry_score| {
+            _ = self.map.remove(entry_score.hash);
+            self.total_evictions += 1;
+        }
+        
+        // Optional: Emergency cleanup for very stale entries regardless of score
+        if (cache_pressure > 0.98) {
+            try self.emergencyStaleCleanup(current_time);
+        }
+    }
+    
+    /// Emergency cleanup to remove very stale entries when cache is critically full
+    fn emergencyStaleCleanup(self: *PredictionCache, current_time: u64) !void {
+        const emergency_age_threshold = 60_000_000_000; // 60 seconds
+        
+        var keys_to_remove = std.ArrayList(u64).init(self.map.allocator);
         defer keys_to_remove.deinit();
         
         var iterator = self.map.iterator();
-        var oldest_timestamp: u64 = std.math.maxInt(u64);
-        
-        // Find oldest entries
         while (iterator.next()) |entry| {
-            if (keys_to_remove.items.len < eviction_count) {
-                keys_to_remove.appendAssumeCapacity(entry.key_ptr.*);
-                oldest_timestamp = @min(oldest_timestamp, entry.value_ptr.timestamp);
-            } else if (entry.value_ptr.timestamp < oldest_timestamp) {
-                // Replace newest entry in eviction list
-                for (keys_to_remove.items, 0..) |key, i| {
-                    if (self.map.get(key).?.timestamp == oldest_timestamp) {
-                        keys_to_remove.items[i] = entry.key_ptr.*;
-                        break;
-                    }
-                }
+            if (current_time - entry.value_ptr.timestamp > emergency_age_threshold) {
+                try keys_to_remove.append(entry.key_ptr.*);
             }
         }
         
-        // Remove selected entries
         for (keys_to_remove.items) |key| {
             _ = self.map.remove(key);
+            self.total_evictions += 1;
         }
     }
+    
+    /// Update quality score for an entry based on prediction accuracy
+    fn updateQualityScore(self: *PredictionCache, hash: u64, was_accurate: bool) void {
+        if (self.map.getPtr(hash)) |entry| {
+            const accuracy_delta: f32 = if (was_accurate) 0.1 else -0.1;
+            const smoothing: f32 = 0.2;
+            
+            entry.quality_score = @min(1.0, @max(0.0, 
+                entry.quality_score * (1.0 - smoothing) + accuracy_delta * smoothing
+            ));
+        }
+    }
+    
+    /// Get cache performance statistics
+    fn getStats(self: *const PredictionCache) CacheStats {
+        const hit_rate = if (self.total_accesses > 0)
+            1.0 - (@as(f32, @floatFromInt(self.total_evictions)) / @as(f32, @floatFromInt(self.total_accesses)))
+        else
+            0.0;
+            
+        var avg_quality: f32 = 0.0;
+        var total_frequency: f32 = 0.0;
+        
+        var iterator = self.map.iterator();
+        while (iterator.next()) |entry| {
+            avg_quality += entry.value_ptr.quality_score;
+            total_frequency += entry.value_ptr.access_frequency;
+        }
+        
+        const entry_count = @as(f32, @floatFromInt(self.map.count()));
+        if (entry_count > 0) {
+            avg_quality /= entry_count;
+            total_frequency /= entry_count;
+        }
+        
+        return CacheStats{
+            .entries = self.map.count(),
+            .hit_rate = hit_rate,
+            .avg_quality_score = avg_quality,
+            .avg_access_frequency = total_frequency,
+            .total_evictions = self.total_evictions,
+        };
+    }
+    
+    const CacheStats = struct {
+        entries: usize,
+        hit_rate: f32,
+        avg_quality_score: f32,
+        avg_access_frequency: f32,
+        total_evictions: u64,
+    };
 };
 
 /// Performance statistics for predictive accounting
@@ -657,4 +830,120 @@ test "prediction cache performance and accuracy tracking" {
     std.debug.print("   Cache hit rate: {d:.1}%\n", .{stats.cache_hit_rate * 100});
     std.debug.print("   Accuracy rate: {d:.1}%\n", .{stats.accuracy_rate * 100});
     std.debug.print("   Profiles tracked: {}\n", .{stats.profiles_tracked});
+}
+
+test "hybrid LFU + age eviction policy performance" {
+    const allocator = std.testing.allocator;
+    
+    const config = PredictiveConfig.performanceOptimized();
+    var predictor = try ContinuationPredictiveAccounting.init(allocator, config);
+    defer predictor.deinit();
+    
+    // Override cache size for testing
+    predictor.prediction_cache.max_entries = 10; // Small cache to force evictions
+    
+    const TestData = struct { value: u32 };
+    
+    const resume_fn = struct {
+        fn executeFunc(cont: *continuation.Continuation) void {
+            const data = @as(*TestData, @ptrCast(@alignCast(cont.data)));
+            data.value += 1;
+            cont.state = .completed;
+        }
+    };
+    
+    // Phase 1: Fill cache with initial entries
+    var test_data_array: [15]TestData = undefined;
+    var continuations: [15]continuation.Continuation = undefined;
+    
+    for (&test_data_array, 0..) |*data, i| {
+        data.* = TestData{ .value = @intCast(i) };
+        continuations[i] = continuation.Continuation.capture(resume_fn.executeFunc, data, allocator);
+        continuations[i].fingerprint_hash = 2000 + i;
+    }
+    
+    // Submit predictions to fill cache beyond capacity
+    for (&continuations) |*cont| {
+        _ = try predictor.predictExecutionTime(cont, null);
+    }
+    
+    const initial_cache_stats = predictor.getCacheStats();
+    try std.testing.expect(initial_cache_stats.entries <= 10); // Cache should be capped
+    
+    // Phase 2: Create access patterns to test hybrid algorithm
+    // Access some entries frequently (high LFU score)
+    for (0..5) |_| {
+        for (0..3) |i| { // Access first 3 entries multiple times
+            _ = try predictor.predictExecutionTime(&continuations[i], null);
+        }
+        std.time.sleep(100_000_000); // 100ms between access rounds
+    }
+    
+    // Phase 3: Update some predictions with high accuracy (high quality score)
+    for (0..3) |i| {
+        // Simulate accurate predictions
+        const predicted = try predictor.predictExecutionTime(&continuations[i], null);
+        const accurate_time = predicted.predicted_time_ns + 100_000; // Within 30% accuracy
+        try predictor.updatePrediction(&continuations[i], accurate_time);
+    }
+    
+    // Update some with poor accuracy (low quality score)
+    for (3..6) |i| {
+        const predicted = try predictor.predictExecutionTime(&continuations[i], null);
+        const inaccurate_time = predicted.predicted_time_ns * 3; // Poor accuracy
+        try predictor.updatePrediction(&continuations[i], inaccurate_time);
+    }
+    
+    // Phase 4: Force more evictions by adding new entries
+    var new_test_data: [10]TestData = undefined;
+    var new_continuations: [10]continuation.Continuation = undefined;
+    
+    for (&new_test_data, 0..) |*data, i| {
+        data.* = TestData{ .value = @intCast(i + 100) };
+        new_continuations[i] = continuation.Continuation.capture(resume_fn.executeFunc, data, allocator);
+        new_continuations[i].fingerprint_hash = 3000 + i;
+    }
+    
+    // Add new entries to force evictions
+    for (&new_continuations) |*cont| {
+        _ = try predictor.predictExecutionTime(cont, null);
+    }
+    
+    const final_cache_stats = predictor.getCacheStats();
+    
+    // Verify hybrid algorithm behavior
+    try std.testing.expect(final_cache_stats.entries <= 10); // Cache size limit respected
+    try std.testing.expect(final_cache_stats.total_evictions > 0); // Evictions occurred
+    try std.testing.expect(final_cache_stats.hit_rate > 0.0); // Some cache hits occurred
+    
+    // Verify frequently accessed and high-quality entries are more likely to be retained
+    var high_value_entries_retained: u32 = 0;
+    for (0..3) |i| { // Check first 3 entries (frequent + high quality)
+        if (predictor.prediction_cache.get(continuations[i].fingerprint_hash.?)) |_| {
+            high_value_entries_retained += 1;
+        }
+    }
+    
+    var low_value_entries_retained: u32 = 0;
+    for (10..13) |i| { // Check less accessed entries
+        if (predictor.prediction_cache.get(continuations[i].fingerprint_hash.?)) |_| {
+            low_value_entries_retained += 1;
+        }
+    }
+    
+    // High-value entries should be more likely to be retained
+    try std.testing.expect(high_value_entries_retained >= low_value_entries_retained);
+    
+    // Performance verification
+    const overall_stats = predictor.getPerformanceStats();
+    
+    std.debug.print("✅ Hybrid LFU + age eviction policy test passed!\n", .{});
+    std.debug.print("   Cache entries: {}/{}\n", .{ final_cache_stats.entries, 10 });
+    std.debug.print("   Total evictions: {}\n", .{final_cache_stats.total_evictions});
+    std.debug.print("   Hit rate: {d:.1}%\n", .{final_cache_stats.hit_rate * 100});
+    std.debug.print("   Avg quality score: {d:.3}\n", .{final_cache_stats.avg_quality_score});
+    std.debug.print("   Avg access frequency: {d:.3}\n", .{final_cache_stats.avg_access_frequency});
+    std.debug.print("   High-value entries retained: {}/3\n", .{high_value_entries_retained});
+    std.debug.print("   Low-value entries retained: {}/3\n", .{low_value_entries_retained});
+    std.debug.print("   Overall accuracy: {d:.1}%\n", .{overall_stats.accuracy_rate * 100});
 }

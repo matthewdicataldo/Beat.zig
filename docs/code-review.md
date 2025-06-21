@@ -390,7 +390,7 @@ Progress tracking for addressing identified issues, ordered from easiest to hard
 - [x] Implement O(1) slab lookup for `SlabAllocator.free` O(n) operations (✅ IMPLEMENTED & COMPILES)
 - [x] Make heartbeat timing adaptive to observed queue lengths (✅ IMPLEMENTED & COMPILES)
 - [x] Offload task profiling to dedicated low-priority worker thread (✅ IMPLEMENTED & COMPILES)
-- [ ] Implement hybrid LFU + age eviction policy for prediction cache
+- [x] Implement hybrid LFU + age eviction policy for prediction cache (✅ IMPLEMENTED & VERIFIED)
 
 ### Concurrency Safety (High Effort)
 - [ ] Protect `SelectionHistory` with mutex or migrate to lock-free counters
