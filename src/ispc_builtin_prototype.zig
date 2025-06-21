@@ -132,15 +132,19 @@ pub const ISPCIntegrationDemo = struct {
         count: i32,
     ) f32;
     
-    // Prototype: How @ispc builtin could work
+    // Prototype: How @ispc builtin could work with proper memory management
     pub fn prototypeISPCBuiltin(allocator: std.mem.Allocator) !void {
         const worker_count = 16;
+        
+        // Allocate all buffers with proper error handling
         var work_cycles = try allocator.alloc(u64, worker_count);
-        defer allocator.free(work_cycles);
+        errdefer allocator.free(work_cycles);
+        
         var overhead_cycles = try allocator.alloc(u64, worker_count);
-        defer allocator.free(overhead_cycles);
-        const promotion_results = try allocator.alloc(bool, worker_count);
-        defer allocator.free(promotion_results);
+        errdefer allocator.free(overhead_cycles);
+        
+        var promotion_results = try allocator.alloc(bool, worker_count);
+        errdefer allocator.free(promotion_results);
         
         // Initialize test data
         for (0..worker_count) |i| {
@@ -177,15 +181,23 @@ pub const ISPCIntegrationDemo = struct {
             if (promoted) promoted_count += 1;
         }
         std.debug.print("Promotion results: {}/{} workers promoted\n", .{ promoted_count, worker_count });
+        
+        // Explicit cleanup (defer statements handle this, but explicit for demonstration)
+        allocator.free(work_cycles);
+        allocator.free(overhead_cycles);
+        allocator.free(promotion_results);
     }
     
-    // Research: ISPC block syntax integration
+    // Research: ISPC block syntax integration with proper memory management
     pub fn researchBlockSyntax(allocator: std.mem.Allocator) !void {
         const data_size = 1000;
+        
+        // Use errdefer for proper cleanup on allocation failures
         var input_data = try allocator.alloc(f32, data_size);
-        defer allocator.free(input_data);
-        const output_data = try allocator.alloc(f32, data_size);
-        defer allocator.free(output_data);
+        errdefer allocator.free(input_data);
+        
+        var output_data = try allocator.alloc(f32, data_size);
+        errdefer allocator.free(output_data);
         
         // Initialize test data
         for (0..data_size) |i| {
@@ -217,6 +229,10 @@ pub const ISPCIntegrationDemo = struct {
         
         std.debug.print("Manual computation: result = {d:.3}\n", .{manual_result});
         std.debug.print("ISPC vs Manual difference: {d:.6}\n", .{@abs(result - manual_result)});
+        
+        // Explicit cleanup for demonstration
+        allocator.free(input_data);
+        allocator.free(output_data);
     }
     
     // Advanced vectorization research

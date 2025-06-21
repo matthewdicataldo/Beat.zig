@@ -309,17 +309,62 @@ pub const SIMDWorkerRegistry = struct {
         self.worker_capabilities[worker_id] = capability;
     }
 
-    /// ISPC-optimized worker selection
+    /// ISPC-optimized worker selection with proper error handling
     pub fn selectOptimalWorker(self: *Self, required_width: u16, data_type: SIMDDataType) ?usize {
+        // Use stack arrays for small worker counts to avoid allocation
+        if (self.worker_count <= 64) {
+            return self.selectOptimalWorkerStack(required_width, data_type);
+        }
+        
+        // For larger worker counts, use heap allocation with proper cleanup
+        return self.selectOptimalWorkerHeap(required_width, data_type) catch null;
+    }
+    
+    fn selectOptimalWorkerStack(self: *Self, required_width: u16, data_type: SIMDDataType) ?usize {
+        var required_widths: [64]f32 = undefined;
+        var data_type_sizes: [64]i32 = undefined;
+        var scores: [64]f32 = undefined;
+
+        // Fill requirements for all workers
+        for (0..self.worker_count) |i| {
+            required_widths[i] = @as(f32, @floatFromInt(required_width));
+            data_type_sizes[i] = @as(i32, @intCast(data_type.getSize()));
+        }
+
+        // Use ISPC kernel for parallel scoring
+        ispc_score_worker_capabilities(
+            self.worker_capabilities.ptr,
+            required_widths[0..self.worker_count].ptr,
+            data_type_sizes[0..self.worker_count].ptr,
+            scores[0..self.worker_count].ptr,
+            @as(i32, @intCast(self.worker_count)),
+        );
+
+        // Find worker with highest score
+        var best_worker: ?usize = null;
+        var best_score: f32 = -1.0;
+
+        for (scores[0..self.worker_count], 0..) |score, i| {
+            if (score > best_score) {
+                best_score = score;
+                best_worker = i;
+            }
+        }
+
+        return best_worker;
+    }
+    
+    fn selectOptimalWorkerHeap(self: *Self, required_width: u16, data_type: SIMDDataType) !?usize {
+        // Allocate all buffers first, then use errdefer for cleanup
         var required_widths = try self.allocator.alloc(f32, self.worker_count);
-        defer self.allocator.free(required_widths);
+        errdefer self.allocator.free(required_widths);
         
         var data_type_sizes = try self.allocator.alloc(i32, self.worker_count);
-        defer self.allocator.free(data_type_sizes);
+        errdefer self.allocator.free(data_type_sizes);
         
         var scores = try self.allocator.alloc(f32, self.worker_count);
-        defer self.allocator.free(scores);
-
+        errdefer self.allocator.free(scores);
+        
         // Fill requirements for all workers
         for (0..self.worker_count) |i| {
             required_widths[i] = @as(f32, @floatFromInt(required_width));
@@ -345,6 +390,11 @@ pub const SIMDWorkerRegistry = struct {
                 best_worker = i;
             }
         }
+        
+        // Cleanup allocated memory
+        self.allocator.free(required_widths);
+        self.allocator.free(data_type_sizes);
+        self.allocator.free(scores);
 
         return best_worker;
     }

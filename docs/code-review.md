@@ -369,9 +369,9 @@ Progress tracking for addressing identified issues, ordered from easiest to hard
 - [x] Fix POSIX path assumptions in `scripts/amalgamate.zig` using `std.fs.path`
 
 ### Memory Management Fixes (Medium Effort)
-- [ ] Audit and fix `ArrayList` leaks in `core.zig:ThreadPool.deinit`
-- [ ] Store and join monitor thread handle in `memory_pressure.zig:stop`
-- [ ] Fix cross-language memory leaks in ISPC wrapper modules
+- [x] Audit and fix `ArrayList` leaks in `core.zig:ThreadPool.deinit`
+- [x] Store and join monitor thread handle in `memory_pressure.zig:stop`
+- [x] Fix cross-language memory leaks in ISPC wrapper modules
 - [ ] Implement proper `free*` helpers for ISPC runtime allocations
 - [ ] Fix Windows DLL handle leak in memory pressure monitoring
 - [ ] Add arena-backed lifetime management for `WorkerInfo` in worker selection

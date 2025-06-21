@@ -165,7 +165,14 @@ pub const MemoryPressureMonitor = struct {
     }
     
     pub fn deinit(self: *MemoryPressureMonitor) void {
+        // Ensure thread is always stopped and joined
         self.stop();
+        
+        // Double-check thread cleanup (defensive programming)
+        if (self.monitor_thread != null) {
+            std.log.warn("MemoryPressureMonitor: Thread handle still exists after stop(), forcing cleanup", .{});
+            self.monitor_thread = null;
+        }
         
         if (self.psi_file) |file| {
             file.close();
@@ -186,18 +193,20 @@ pub const MemoryPressureMonitor = struct {
         // Update initial metrics
         try self.updateMetrics();
         
+        // Create thread BEFORE setting running flag to avoid race condition
+        const thread = try std.Thread.spawn(.{}, monitorLoop, .{self});
+        
+        // Only set running state after successful thread creation
+        self.monitor_thread = thread;
         self.is_running.store(true, .release);
-        self.monitor_thread = try std.Thread.spawn(.{}, monitorLoop, .{self});
     }
     
-    /// Stop the monitoring thread
+    /// Stop the monitoring thread and ensure proper cleanup
     pub fn stop(self: *MemoryPressureMonitor) void {
-        if (!self.is_running.load(.acquire)) {
-            return; // Not running
-        }
-        
+        // Always try to stop, even if running flag is inconsistent
         self.is_running.store(false, .release);
         
+        // Always join thread if it exists, regardless of running flag
         if (self.monitor_thread) |thread| {
             thread.join();
             self.monitor_thread = null;
@@ -231,6 +240,17 @@ pub const MemoryPressureMonitor = struct {
     /// Get recommended task batch limit based on current pressure
     pub fn getTaskBatchLimit(self: *const MemoryPressureMonitor, default_limit: u32) u32 {
         return self.getCurrentLevel().getTaskBatchLimit(default_limit);
+    }
+    
+    /// Check if the monitoring thread is properly initialized and running
+    pub fn isThreadHealthy(self: *const MemoryPressureMonitor) bool {
+        const running = self.is_running.load(.acquire);
+        const has_thread = self.monitor_thread != null;
+        
+        // Thread is healthy if:
+        // 1. Not running and no thread handle (stopped state)
+        // 2. Running and has thread handle (active state)
+        return (running and has_thread) or (!running and !has_thread);
     }
     
     /// Update memory pressure metrics (called by monitoring thread)
@@ -416,6 +436,11 @@ pub const MemoryPressureMonitor = struct {
     fn monitorLoop(self: *MemoryPressureMonitor) void {
         const interval_ns = @as(u64, self.config.update_interval_ms) * 1_000_000;
         
+        // Log thread start for debugging
+        if (builtin.mode == .Debug) {
+            std.debug.print("MemoryPressureMonitor: Monitoring thread started\n", .{});
+        }
+        
         while (self.is_running.load(.acquire)) {
             self.updateMetrics() catch |err| {
                 if (builtin.mode == .Debug) {
@@ -423,7 +448,19 @@ pub const MemoryPressureMonitor = struct {
                 }
             };
             
-            std.time.sleep(interval_ns);
+            // Sleep with periodic checks for shutdown (improved responsiveness)
+            const sleep_chunks = 10; // Check shutdown flag 10 times during sleep
+            const chunk_ns = interval_ns / sleep_chunks;
+            
+            for (0..sleep_chunks) |_| {
+                if (!self.is_running.load(.acquire)) break;
+                std.time.sleep(chunk_ns);
+            }
+        }
+        
+        // Log thread exit for debugging
+        if (builtin.mode == .Debug) {
+            std.debug.print("MemoryPressureMonitor: Monitoring thread exiting\n", .{});
         }
     }
 };

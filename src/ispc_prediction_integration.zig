@@ -19,6 +19,109 @@ const ISPC_BATCH_THRESHOLD = 4; // Minimum batch size for ISPC acceleration
 const ISPC_SIMILARITY_THRESHOLD = 8; // Minimum fingerprint count for similarity matrix
 const ISPC_WORKER_THRESHOLD = 4; // Minimum worker count for vectorized selection
 
+/// Memory pool for ISPC buffer management to eliminate cross-language memory leaks
+const ISPCBufferPool = struct {
+    allocator: std.mem.Allocator,
+    u64_buffers: std.ArrayList([]u64),
+    u32_buffers: std.ArrayList([]u32),
+    f32_buffers: std.ArrayList([]f32),
+    max_pool_size: usize,
+    
+    const Self = @This();
+    
+    pub fn init(allocator: std.mem.Allocator) Self {
+        return Self{
+            .allocator = allocator,
+            .u64_buffers = std.ArrayList([]u64).init(allocator),
+            .u32_buffers = std.ArrayList([]u32).init(allocator),
+            .f32_buffers = std.ArrayList([]f32).init(allocator),
+            .max_pool_size = 16, // Limit pool size to prevent excessive memory usage
+        };
+    }
+    
+    pub fn deinit(self: *Self) void {
+        // Free all pooled buffers
+        for (self.u64_buffers.items) |buffer| {
+            self.allocator.free(buffer);
+        }
+        for (self.u32_buffers.items) |buffer| {
+            self.allocator.free(buffer);
+        }
+        for (self.f32_buffers.items) |buffer| {
+            self.allocator.free(buffer);
+        }
+        
+        self.u64_buffers.deinit();
+        self.u32_buffers.deinit();
+        self.f32_buffers.deinit();
+    }
+    
+    pub fn getU64Buffer(self: *Self, size: usize) ![]u64 {
+        // Try to reuse existing buffer of sufficient size
+        for (self.u64_buffers.items, 0..) |buffer, i| {
+            if (buffer.len >= size) {
+                _ = self.u64_buffers.swapRemove(i);
+                return buffer[0..size];
+            }
+        }
+        
+        // Allocate new buffer if no suitable buffer found
+        return try self.allocator.alloc(u64, size);
+    }
+    
+    pub fn returnU64Buffer(self: *Self, buffer: []u64) void {
+        // Return buffer to pool if pool not full
+        if (self.u64_buffers.items.len < self.max_pool_size) {
+            self.u64_buffers.append(buffer) catch {
+                // If pool append fails, just free the buffer
+                self.allocator.free(buffer);
+            };
+        } else {
+            self.allocator.free(buffer);
+        }
+    }
+    
+    pub fn getU32Buffer(self: *Self, size: usize) ![]u32 {
+        for (self.u32_buffers.items, 0..) |buffer, i| {
+            if (buffer.len >= size) {
+                _ = self.u32_buffers.swapRemove(i);
+                return buffer[0..size];
+            }
+        }
+        return try self.allocator.alloc(u32, size);
+    }
+    
+    pub fn returnU32Buffer(self: *Self, buffer: []u32) void {
+        if (self.u32_buffers.items.len < self.max_pool_size) {
+            self.u32_buffers.append(buffer) catch {
+                self.allocator.free(buffer);
+            };
+        } else {
+            self.allocator.free(buffer);
+        }
+    }
+    
+    pub fn getF32Buffer(self: *Self, size: usize) ![]f32 {
+        for (self.f32_buffers.items, 0..) |buffer, i| {
+            if (buffer.len >= size) {
+                _ = self.f32_buffers.swapRemove(i);
+                return buffer[0..size];
+            }
+        }
+        return try self.allocator.alloc(f32, size);
+    }
+    
+    pub fn returnF32Buffer(self: *Self, buffer: []f32) void {
+        if (self.f32_buffers.items.len < self.max_pool_size) {
+            self.f32_buffers.append(buffer) catch {
+                self.allocator.free(buffer);
+            };
+        } else {
+            self.allocator.free(buffer);
+        }
+    }
+};
+
 /// External ISPC kernel declarations (conditionally compiled)
 extern "ispc_compute_fingerprint_similarity" fn ispc_compute_fingerprint_similarity(
     fingerprints_a: [*]const u64,
@@ -66,6 +169,8 @@ extern "ispc_score_workers_batch" fn ispc_score_workers_batch(
 pub const PredictionAccelerator = struct {
     config: AcceleratorConfig,
     fallback_stats: FallbackStats,
+    allocator: std.mem.Allocator,
+    buffer_pool: ISPCBufferPool,
     
     pub const AcceleratorConfig = struct {
         enable_ispc: bool = true,
@@ -82,11 +187,17 @@ pub const PredictionAccelerator = struct {
         performance_ratio: f64 = 1.0, // ISPC speedup vs native
     };
     
-    pub fn init(config: AcceleratorConfig) PredictionAccelerator {
+    pub fn init(allocator: std.mem.Allocator, config: AcceleratorConfig) PredictionAccelerator {
         return PredictionAccelerator{
             .config = config,
             .fallback_stats = FallbackStats{},
+            .allocator = allocator,
+            .buffer_pool = ISPCBufferPool.init(allocator),
         };
+    }
+    
+    pub fn deinit(self: *PredictionAccelerator) void {
+        self.buffer_pool.deinit();
     }
     
     /// Transparent fingerprint similarity computation with automatic ISPC acceleration
@@ -246,17 +357,17 @@ pub const PredictionAccelerator = struct {
         fingerprints_b: []const fingerprint.TaskFingerprint,
         results: []f32,
     ) !void {
-        _ = self;
         if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
         
         // Convert fingerprints to u64 arrays for ISPC
         const count = @as(i32, @intCast(fingerprints_a.len));
         
-        // TODO: Consider memory pooling for frequent allocations
-        var a_buffer = try std.heap.page_allocator.alloc(u64, fingerprints_a.len * 2);
-        defer std.heap.page_allocator.free(a_buffer);
-        var b_buffer = try std.heap.page_allocator.alloc(u64, fingerprints_b.len * 2);
-        defer std.heap.page_allocator.free(b_buffer);
+        // Use reusable buffer pool to eliminate repeated allocations
+        const buffer_size = fingerprints_a.len * 2;
+        var a_buffer = try self.buffer_pool.getU64Buffer(buffer_size);
+        defer self.buffer_pool.returnU64Buffer(a_buffer);
+        var b_buffer = try self.buffer_pool.getU64Buffer(buffer_size);
+        defer self.buffer_pool.returnU64Buffer(b_buffer);
         
         // Pack fingerprints into u64 arrays
         for (fingerprints_a, 0..) |fp, i| {
@@ -285,13 +396,13 @@ pub const PredictionAccelerator = struct {
         fingerprints: []const fingerprint.TaskFingerprint,
         similarity_matrix: []f32,
     ) !void {
-        _ = self;
         if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
         
         const count = @as(i32, @intCast(fingerprints.len));
         
-        var fingerprint_buffer = try std.heap.page_allocator.alloc(u64, fingerprints.len * 2);
-        defer std.heap.page_allocator.free(fingerprint_buffer);
+        const buffer_size = fingerprints.len * 2;
+        var fingerprint_buffer = try self.buffer_pool.getU64Buffer(buffer_size);
+        defer self.buffer_pool.returnU64Buffer(fingerprint_buffer);
         
         // Pack fingerprints
         for (fingerprints, 0..) |fp, i| {
@@ -338,20 +449,19 @@ pub const PredictionAccelerator = struct {
         profiles: []const fingerprint.FingerprintRegistry.ProfileEntry,
         confidence_results: []intelligent_decision.MultiFactorConfidence,
     ) !void {
-        _ = self;
         if (!ISPC_AVAILABLE) return error.ISPCNotAvailable;
         
         const count = @as(i32, @intCast(profiles.len));
         
-        // Extract data for ISPC processing
-        var execution_counts = try std.heap.page_allocator.alloc(u32, profiles.len);
-        defer std.heap.page_allocator.free(execution_counts);
-        var accuracy_scores = try std.heap.page_allocator.alloc(f32, profiles.len);
-        defer std.heap.page_allocator.free(accuracy_scores);
-        var temporal_scores = try std.heap.page_allocator.alloc(f32, profiles.len);
-        defer std.heap.page_allocator.free(temporal_scores);
-        var variance_scores = try std.heap.page_allocator.alloc(f32, profiles.len);
-        defer std.heap.page_allocator.free(variance_scores);
+        // Extract data for ISPC processing using buffer pool
+        var execution_counts = try self.buffer_pool.getU32Buffer(profiles.len);
+        defer self.buffer_pool.returnU32Buffer(execution_counts);
+        var accuracy_scores = try self.buffer_pool.getF32Buffer(profiles.len);
+        defer self.buffer_pool.returnF32Buffer(accuracy_scores);
+        var temporal_scores = try self.buffer_pool.getF32Buffer(profiles.len);
+        defer self.buffer_pool.returnF32Buffer(temporal_scores);
+        var variance_scores = try self.buffer_pool.getF32Buffer(profiles.len);
+        defer self.buffer_pool.returnF32Buffer(variance_scores);
         
         for (profiles, 0..) |profile, i| {
             execution_counts[i] = profile.execution_count;
@@ -493,15 +603,22 @@ pub const PredictionAccelerator = struct {
 var global_accelerator: ?PredictionAccelerator = null;
 
 /// Initialize global prediction accelerator (called automatically by Beat.zig)
-pub fn initGlobalAccelerator(config: PredictionAccelerator.AcceleratorConfig) void {
-    global_accelerator = PredictionAccelerator.init(config);
+pub fn initGlobalAccelerator(allocator: std.mem.Allocator, config: PredictionAccelerator.AcceleratorConfig) void {
+    global_accelerator = PredictionAccelerator.init(allocator, config);
+}
+
+/// Deinitialize global accelerator (should be called on shutdown)
+pub fn deinitGlobalAccelerator() void {
+    if (global_accelerator) |*accel| {
+        accel.deinit();
+        global_accelerator = null;
+    }
 }
 
 /// Get global accelerator instance
 pub fn getGlobalAccelerator() *PredictionAccelerator {
     if (global_accelerator == null) {
-        // Auto-initialize with default config
-        initGlobalAccelerator(PredictionAccelerator.AcceleratorConfig{});
+        @panic("Global ISPC accelerator not initialized. Call initGlobalAccelerator() with proper allocator first.");
     }
     return &global_accelerator.?;
 }
