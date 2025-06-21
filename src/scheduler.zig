@@ -100,6 +100,12 @@ pub const Scheduler = struct {
     pressure_adaptations: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     last_pressure_check: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
     
+    // Adaptive heartbeat timing (Performance Optimization)
+    adaptive_interval_ns: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    recent_promotions: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    last_activity_check: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    heartbeat_adjustments: std.atomic.Value(u64) = std.atomic.Value(u64).init(0),
+    
     pub fn init(allocator: std.mem.Allocator, config: *const core.Config) !*Scheduler {
         const self = try allocator.create(Scheduler);
         self.* = .{
@@ -113,6 +119,11 @@ pub const Scheduler = struct {
         for (self.worker_tokens) |*tokens| {
             tokens.* = TokenAccount.init(config);
         }
+        
+        // Initialize adaptive heartbeat with baseline interval
+        const baseline_interval_ns = @as(u64, config.heartbeat_interval_us) * 1000;
+        self.adaptive_interval_ns.store(baseline_interval_ns, .monotonic);
+        self.last_activity_check.store(@as(u64, @intCast(std.time.nanoTimestamp())), .monotonic);
         
         // Initialize memory pressure monitoring if enabled
         if (config.enable_numa_aware) { // Reuse NUMA flag for memory awareness
@@ -296,21 +307,112 @@ pub const Scheduler = struct {
         return self.pressure_adaptations.load(.acquire);
     }
     
+    // ========================================================================
+    // Adaptive Heartbeat Timing (Performance Optimization)
+    // ========================================================================
+    
+    /// Calculate adaptive heartbeat interval based on recent activity
+    fn calculateAdaptiveInterval(self: *Scheduler, baseline_ns: u64, previous_promotions: u64) u64 {
+        const current_time = @as(u64, @intCast(std.time.nanoTimestamp()));
+        const current_promotions = self.promotions_triggered.load(.monotonic);
+        const last_check = self.last_activity_check.load(.monotonic);
+        
+        // Calculate promotion rate (promotions per second)
+        const time_delta_ns = current_time - last_check;
+        const promotion_delta = current_promotions - previous_promotions;
+        
+        if (time_delta_ns < 100_000_000) { // Less than 100ms since last check
+            return self.adaptive_interval_ns.load(.monotonic); // Use cached interval
+        }
+        
+        // Update activity tracking
+        self.last_activity_check.store(current_time, .monotonic);
+        
+        // Calculate promotion rate (promotions per second)
+        const time_delta_s = @as(f64, @floatFromInt(time_delta_ns)) / 1_000_000_000.0;
+        const promotion_rate = if (time_delta_s > 0.001) 
+            @as(f64, @floatFromInt(promotion_delta)) / time_delta_s 
+        else 
+            0.0;
+        
+        // Adaptive scaling based on activity level
+        var scale_factor: f64 = 1.0;
+        
+        if (promotion_rate > 50.0) {
+            // High activity: increase frequency (reduce interval) by up to 50%
+            scale_factor = 0.5; // 2x faster heartbeat
+        } else if (promotion_rate > 20.0) {
+            // Medium activity: increase frequency by 25%
+            scale_factor = 0.75; // 1.33x faster heartbeat
+        } else if (promotion_rate > 5.0) {
+            // Light activity: normal frequency
+            scale_factor = 1.0; // baseline frequency
+        } else if (promotion_rate > 1.0) {
+            // Very light activity: reduce frequency by 50%
+            scale_factor = 2.0; // 2x slower heartbeat
+        } else {
+            // Idle: reduce frequency by up to 90%
+            scale_factor = 10.0; // 10x slower heartbeat
+        }
+        
+        // Apply scaling with bounds checking
+        const new_interval_ns = @as(u64, @intFromFloat(@as(f64, @floatFromInt(baseline_ns)) * scale_factor));
+        
+        // Clamp to reasonable bounds (10μs to 10ms)
+        const min_interval_ns = 10_000; // 10μs minimum for responsiveness
+        const max_interval_ns = 10_000_000; // 10ms maximum for power savings
+        const clamped_interval_ns = @max(min_interval_ns, @min(max_interval_ns, new_interval_ns));
+        
+        // Store new interval and track adjustments
+        self.adaptive_interval_ns.store(clamped_interval_ns, .monotonic);
+        _ = self.heartbeat_adjustments.fetchAdd(1, .monotonic);
+        
+        // Debug logging in development builds
+        if (builtin.mode == .Debug and scale_factor != 1.0) {
+            std.debug.print("Adaptive heartbeat: rate={:.1}/s scale={:.2} interval={}μs\n", 
+                .{ promotion_rate, scale_factor, clamped_interval_ns / 1000 });
+        }
+        
+        return clamped_interval_ns;
+    }
+    
+    /// Get current adaptive heartbeat statistics
+    pub fn getHeartbeatStats(self: *const Scheduler) struct { 
+        current_interval_us: u64, 
+        adjustments_count: u64 
+    } {
+        const current_interval_ns = self.adaptive_interval_ns.load(.acquire);
+        const adjustments = self.heartbeat_adjustments.load(.acquire);
+        
+        return .{
+            .current_interval_us = current_interval_ns / 1000,
+            .adjustments_count = adjustments,
+        };
+    }
+    
     fn heartbeatLoop(self: *Scheduler) void {
-        const interval_ns = @as(u64, self.config.heartbeat_interval_us) * 1000;
+        const baseline_interval_ns = @as(u64, self.config.heartbeat_interval_us) * 1000;
         var previous_pressure_level: memory_pressure.MemoryPressureLevel = .none;
+        var previous_promotions: u64 = 0;
         
         while (self.running.load(.acquire)) {
-            std.time.sleep(interval_ns);
+            // Adaptive timing: adjust interval based on recent activity
+            const current_interval_ns = self.calculateAdaptiveInterval(baseline_interval_ns, previous_promotions);
+            std.time.sleep(current_interval_ns);
             
-            // Periodic promotion check
+            // Periodic promotion check with activity tracking
+            var promotions_this_cycle: u64 = 0;
             for (self.worker_tokens, 0..) |*tokens, worker_id| {
                 if (tokens.shouldPromote()) {
                     // Trigger work promotion: signal that work execution is efficient
                     self.triggerPromotion(@intCast(worker_id));
                     tokens.reset();
+                    promotions_this_cycle += 1;
                 }
             }
+            
+            // Update activity tracking for adaptive timing
+            previous_promotions = self.promotions_triggered.load(.monotonic);
             
             // Memory pressure monitoring (V3 - Memory-Aware Scheduling)
             if (self.memory_monitor) |monitor| {
