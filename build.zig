@@ -1060,7 +1060,7 @@ pub fn build(b: *std.Build) void {
         // Optimized ISPC kernels test
         const optimized_kernels_test = b.addExecutable(.{
             .name = "test_optimized_kernels",
-            .root_source_file = b.path("test_optimized_kernels.zig"),
+            .root_source_file = b.path("tests/test_optimized_kernels.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -1084,7 +1084,7 @@ pub fn build(b: *std.Build) void {
         // Heartbeat scheduling ISPC kernels test
         const heartbeat_kernels_test = b.addExecutable(.{
             .name = "test_heartbeat_kernels",
-            .root_source_file = b.path("test_heartbeat_kernels.zig"),
+            .root_source_file = b.path("tests/test_heartbeat_kernels.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -1107,7 +1107,7 @@ pub fn build(b: *std.Build) void {
         
         // Advanced ISPC Research Test Suite (Phase 3 Deep Dive)
         const advanced_ispc_research_test = b.addTest(.{
-            .root_source_file = b.path("test_advanced_ispc_research.zig"),
+            .root_source_file = b.path("tests/test_advanced_ispc_research.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });
@@ -1131,7 +1131,7 @@ pub fn build(b: *std.Build) void {
         
         // Prediction Integration Test Suite (Production Integration)
         const prediction_integration_test = b.addTest(.{
-            .root_source_file = b.path("test_prediction_integration.zig"),
+            .root_source_file = b.path("tests/test_prediction_integration.zig"),
             .target = target,
             .optimize = .ReleaseFast,
         });

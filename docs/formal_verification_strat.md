@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document outlines how we can leverage modern LLM-assisted proof systems to formally verify the correctness of ZigPulse's lock-free algorithms and concurrent data structures.
+This document outlines how we can leverage modern LLM-assisted proof systems to formally verify the correctness of beat.zig's lock-free algorithms and concurrent data structures.
 
 ## Motivation
 
