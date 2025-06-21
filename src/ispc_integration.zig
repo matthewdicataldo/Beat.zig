@@ -344,6 +344,7 @@ pub const Testing = struct {
         input_data: anytype,
         iterations: u32,
     ) !struct { native_time: u64, ispc_time: u64, speedup: f64 } {
+        _ = allocator; // Reserved for future temporary buffer allocation
         var timer = try std.time.Timer.start();
         
         // Benchmark native implementation

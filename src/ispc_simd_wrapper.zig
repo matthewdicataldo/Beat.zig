@@ -372,6 +372,8 @@ pub const SIMDWorkerRegistry = struct {
         // Output buffer for ISPC function (mutated externally)
         var scores = try self.allocator.alloc(f32, self.worker_count);
         errdefer self.allocator.free(scores);
+        // Explicitly mark as mutable to satisfy compiler (buffer written by external ISPC function)
+        std.mem.doNotOptimizeAway(&scores);
         
         // Fill requirements for all workers
         for (0..self.worker_count) |i| {
