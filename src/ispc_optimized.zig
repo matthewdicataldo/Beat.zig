@@ -123,7 +123,7 @@ pub const ISPCPredictionSystem = struct {
 };
 
 /// External ISPC function declarations for SoA operations
-extern fn ispc_compute_fingerprint_similarity_soa(
+extern "ispc_compute_fingerprint_similarity_soa" fn ispc_compute_fingerprint_similarity_soa(
     fingerprints_a_low: [*]u64,
     fingerprints_a_high: [*]u64,
     fingerprints_b_low: [*]u64,
@@ -132,14 +132,14 @@ extern fn ispc_compute_fingerprint_similarity_soa(
     count: i32,
 ) void;
 
-extern fn ispc_compute_similarity_matrix_soa(
+extern "ispc_compute_similarity_matrix_soa" fn ispc_compute_similarity_matrix_soa(
     fingerprints_low: [*]u64,
     fingerprints_high: [*]u64,
     similarity_matrix: [*]f32,
     count: i32,
 ) void;
 
-extern fn ispc_batch_similarity_scoring_soa(
+extern "ispc_batch_similarity_scoring_soa" fn ispc_batch_similarity_scoring_soa(
     fingerprints_low: [*]u64,
     fingerprints_high: [*]u64,
     task_priorities: [*]f32,
@@ -147,14 +147,14 @@ extern fn ispc_batch_similarity_scoring_soa(
     count: i32,
 ) void;
 
-extern fn ispc_compute_fingerprint_hashes_soa(
+extern "ispc_compute_fingerprint_hashes_soa" fn ispc_compute_fingerprint_hashes_soa(
     fingerprints_low: [*]u64,
     fingerprints_high: [*]u64,
     hashes: [*]u32,
     count: i32,
 ) void;
 
-extern fn ispc_one_euro_filter_batch(
+extern "ispc_one_euro_filter_batch" fn ispc_one_euro_filter_batch(
     raw_values: [*]f32,
     timestamps: [*]f32,
     states: [*]OneEuroFilterState,
@@ -162,7 +162,7 @@ extern fn ispc_one_euro_filter_batch(
     count: i32,
 ) void;
 
-extern fn ispc_compute_prediction_confidence(
+extern "ispc_compute_prediction_confidence" fn ispc_compute_prediction_confidence(
     predicted_values: [*]f32,
     actual_values: [*]f32,
     timestamps: [*]f32,
@@ -170,7 +170,7 @@ extern fn ispc_compute_prediction_confidence(
     count: i32,
 ) void;
 
-extern fn ispc_compute_prediction_scores(
+extern "ispc_compute_prediction_scores" fn ispc_compute_prediction_scores(
     execution_times: [*]f32,
     confidence_levels: [*]f32,
     worker_loads: [*]f32,

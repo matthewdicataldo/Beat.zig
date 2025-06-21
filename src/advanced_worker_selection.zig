@@ -576,12 +576,12 @@ pub const AdvancedWorkerSelector = struct {
         
         // Normalize to 0.0-1.0 range
         const score_range = max_score - min_score;
-        if (score_range > 0.0) {
+        if (score_range > 0.0 and max_score > 0.0) {
             for (evaluations) |*eval| {
                 eval.normalized_score = (eval.weighted_score - min_score) / score_range;
             }
         } else {
-            // All scores equal - normalize to 0.5
+            // All scores equal or max_score is zero - normalize to 0.5
             for (evaluations) |*eval| {
                 eval.normalized_score = 0.5;
             }

@@ -111,7 +111,7 @@ pub const ISPC = struct {
 // Example usage: What seamless @ispc integration could look like
 pub const ISPCIntegrationDemo = struct {
     // External ISPC functions (current approach)
-    extern fn ispc_advanced_task_parallel_scheduling(
+    extern "ispc_advanced_task_parallel_scheduling" fn ispc_advanced_task_parallel_scheduling(
         work_cycles: [*]u64,
         overhead_cycles: [*]u64,
         promotion_results: [*]bool,
@@ -119,14 +119,14 @@ pub const ISPCIntegrationDemo = struct {
         task_chunk_size: u64,
     ) void;
     
-    extern fn ispc_cross_lane_load_balancing(
+    extern "ispc_cross_lane_load_balancing" fn ispc_cross_lane_load_balancing(
         worker_loads: [*]f32,
         target_loads: [*]f32,
         redistribution_matrix: [*]f32,
         worker_count: i32,
     ) void;
     
-    extern fn ispc_advanced_simd_reduction(
+    extern "ispc_advanced_simd_reduction" fn ispc_advanced_simd_reduction(
         data: [*]f32,
         operation_type: i32,
         count: i32,

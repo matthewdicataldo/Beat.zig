@@ -211,7 +211,7 @@ pub const BuildIntegration = struct {
 pub const Kernels = struct {
     /// Fingerprint similarity computation using ISPC SPMD
     pub const FingerprintSimilarity = struct {
-        pub extern fn ispc_compute_fingerprint_similarity(
+        pub extern "ispc_compute_fingerprint_similarity" fn ispc_compute_fingerprint_similarity(
             fingerprints_a: [*]const u128,
             fingerprints_b: [*]const u128,
             results: [*]f32,
@@ -240,7 +240,7 @@ pub const Kernels = struct {
     
     /// Batch formation optimization using ISPC
     pub const BatchOptimization = struct {
-        pub extern fn ispc_optimize_batch_formation(
+        pub extern "ispc_optimize_batch_formation" fn ispc_optimize_batch_formation(
             task_scores: [*]const f32,
             similarity_matrix: [*]const f32,
             batch_indices: [*]u32,
@@ -270,7 +270,7 @@ pub const Kernels = struct {
     
     /// Multi-criteria worker selection scoring using ISPC
     pub const WorkerSelection = struct {
-        pub extern fn ispc_compute_worker_scores(
+        pub extern "ispc_compute_worker_scores" fn ispc_compute_worker_scores(
             worker_loads: [*]const f32,
             numa_distances: [*]const f32, 
             cache_affinities: [*]const f32,

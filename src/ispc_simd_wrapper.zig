@@ -7,24 +7,24 @@ const builtin = @import("builtin");
 const ispc_integration = @import("ispc_integration.zig");
 
 // External ISPC kernel function declarations
-extern fn ispc_detect_simd_capabilities(
+extern "ispc_detect_simd_capabilities" fn ispc_detect_simd_capabilities(
     capabilities: [*]SIMDCapability,
     max_capabilities: i32,
     detected_count: *i32,
 ) void;
 
-extern fn ispc_get_optimal_vector_length(
+extern "ispc_get_optimal_vector_length" fn ispc_get_optimal_vector_length(
     instruction_set: i32,
     data_type_size: i32,
     vector_width: i32,
 ) i32;
 
-extern fn ispc_supports_operation(
+extern "ispc_supports_operation" fn ispc_supports_operation(
     instruction_set: i32,
     operation_type: i32,
 ) bool;
 
-extern fn ispc_score_worker_capabilities(
+extern "ispc_score_worker_capabilities" fn ispc_score_worker_capabilities(
     worker_capabilities: [*]SIMDCapability,
     required_vector_widths: [*]f32,
     data_type_sizes: [*]i32,
@@ -32,25 +32,25 @@ extern fn ispc_score_worker_capabilities(
     worker_count: i32,
 ) void;
 
-extern fn ispc_simd_memory_copy(
+extern "ispc_simd_memory_copy" fn ispc_simd_memory_copy(
     dest: [*]u8,
     src: [*]const u8,
     size: u64,
     alignment: i32,
 ) void;
 
-extern fn ispc_simd_memory_zero(
+extern "ispc_simd_memory_zero" fn ispc_simd_memory_zero(
     dest: [*]u8,
     size: u64,
     alignment: i32,
 ) void;
 
-extern fn ispc_check_alignment(
+extern "ispc_check_alignment" fn ispc_check_alignment(
     ptr: [*]const u8,
     required_alignment: i32,
 ) bool;
 
-extern fn ispc_simd_batch_enqueue(
+extern "ispc_simd_batch_enqueue" fn ispc_simd_batch_enqueue(
     queue: [*]SIMDQueueElement,
     queue_head: *u64,
     queue_tail: *u64,
@@ -60,7 +60,7 @@ extern fn ispc_simd_batch_enqueue(
     elements_enqueued: *u64,
 ) void;
 
-extern fn ispc_simd_batch_dequeue(
+extern "ispc_simd_batch_dequeue" fn ispc_simd_batch_dequeue(
     queue: [*]SIMDQueueElement,
     queue_head: *u64,
     queue_tail: *u64,

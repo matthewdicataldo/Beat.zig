@@ -20,20 +20,20 @@ const ISPC_SIMILARITY_THRESHOLD = 8; // Minimum fingerprint count for similarity
 const ISPC_WORKER_THRESHOLD = 4; // Minimum worker count for vectorized selection
 
 /// External ISPC kernel declarations (conditionally compiled)
-extern fn ispc_compute_fingerprint_similarity(
+extern "ispc_compute_fingerprint_similarity" fn ispc_compute_fingerprint_similarity(
     fingerprints_a: [*]const u64,
     fingerprints_b: [*]const u64,
     results: [*]f32,
     count: i32,
 ) void;
 
-extern fn ispc_compute_similarity_matrix(
+extern "ispc_compute_similarity_matrix" fn ispc_compute_similarity_matrix(
     fingerprints: [*]const u64,
     similarity_matrix: [*]f32,
     count: i32,
 ) void;
 
-extern fn ispc_process_one_euro_filter_batch(
+extern "ispc_process_one_euro_filter_batch" fn ispc_process_one_euro_filter_batch(
     measurements: [*]const f32,
     timestamps: [*]const u64,
     states: [*]fingerprint.OneEuroState,
@@ -44,7 +44,7 @@ extern fn ispc_process_one_euro_filter_batch(
     fc_min: f32,
 ) void;
 
-extern fn ispc_compute_multi_factor_confidence_batch(
+extern "ispc_compute_multi_factor_confidence_batch" fn ispc_compute_multi_factor_confidence_batch(
     execution_counts: [*]const u32,
     accuracy_scores: [*]const f32,
     temporal_scores: [*]const f32,
@@ -53,7 +53,7 @@ extern fn ispc_compute_multi_factor_confidence_batch(
     count: i32,
 ) void;
 
-extern fn ispc_score_workers_batch(
+extern "ispc_score_workers_batch" fn ispc_score_workers_batch(
     worker_loads: [*]const f32,
     numa_distances: [*]const f32,
     prediction_accuracies: [*]const f32,

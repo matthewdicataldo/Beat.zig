@@ -93,7 +93,7 @@ const Amalgamator = struct {
         
         // Process each module in order
         for (modules) |module| {
-            const module_path = try std.fmt.allocPrint(self.allocator, "src/{s}", .{module});
+            const module_path = try std.fs.path.join(self.allocator, &.{ "src", module });
             defer self.allocator.free(module_path);
             
             try self.processModule(module_path);
@@ -167,7 +167,7 @@ const Amalgamator = struct {
         
         // Get module name
         const basename = std.fs.path.basename(path);
-        const module_name = basename[0..basename.len - 4]; // Remove .zig
+        const module_name = std.fs.path.stem(basename); // Remove extension properly
         
         // Process line by line
         var lines = std.mem.tokenizeScalar(u8, content, '\n');
