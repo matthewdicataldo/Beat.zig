@@ -10,6 +10,10 @@ const predictive_accounting = @import("predictive_accounting.zig");
 const intelligent_decision = @import("intelligent_decision.zig");
 const simd_classifier = @import("simd_classifier.zig");
 
+// ISPC extern function declarations
+extern fn ispc_free_prediction_acceleration_state() void;
+extern fn ispc_final_cleanup() void;
+
 /// Compile-time ISPC availability detection
 const ISPC_AVAILABLE = @hasDecl(@This(), "ispc_compute_fingerprint_similarity") and 
                        @hasDecl(@This(), "ispc_process_one_euro_filter_batch");
@@ -200,7 +204,6 @@ pub const PredictionAccelerator = struct {
         self.buffer_pool.deinit();
         
         // Clean up ISPC prediction acceleration state
-        extern fn ispc_free_prediction_acceleration_state() void;
         ispc_free_prediction_acceleration_state();
     }
     
@@ -629,7 +632,6 @@ pub fn deinitGlobalAccelerator() void {
     ispc_simd_wrapper.cleanupAllISPCResources();
     
     // Final cleanup of any remaining ISPC state
-    extern "ispc_final_cleanup" fn ispc_final_cleanup() void;
     ispc_final_cleanup();
 }
 
@@ -685,7 +687,7 @@ pub const TransparentAPI = struct {
     ) void {
         const accelerator = getGlobalAccelerator() catch {
             // Fallback to native implementation when ISPC unavailable
-            _ = config; // Configuration would be used in actual OneEuroFilter implementation
+            // TODO: Use config parameters in native OneEuroFilter implementation
             for (measurements, timestamps, states, results) |measurement, timestamp, *state, *result| {
                 result.* = fingerprint.OneEuroFilter.processValue(state, measurement, timestamp);
             }

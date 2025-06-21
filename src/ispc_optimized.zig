@@ -4,6 +4,11 @@
 
 const std = @import("std");
 
+// ISPC extern function declarations
+extern fn ispc_free_soa_fingerprint_cache() void;
+extern fn ispc_free_one_euro_filter_state() void;
+extern fn ispc_free_optimized_fingerprint_caches() void;
+
 /// Structure of Arrays fingerprint storage for ISPC optimization
 /// Eliminates gather operations for 4-8x memory access improvement
 pub const FingerprintSoA = struct {
@@ -28,7 +33,6 @@ pub const FingerprintSoA = struct {
         self.allocator.free(self.high_bits);
         
         // Clean up any ISPC-side caches associated with this SoA structure
-        extern "ispc_free_soa_fingerprint_cache" fn ispc_free_soa_fingerprint_cache() void;
         ispc_free_soa_fingerprint_cache();
     }
     
@@ -119,7 +123,6 @@ pub const ISPCPredictionSystem = struct {
         self.allocator.free(self.confidence_scores);
         
         // Clean up ISPC One Euro Filter internal state
-        extern "ispc_free_one_euro_filter_state" fn ispc_free_one_euro_filter_state() void;
         ispc_free_one_euro_filter_state();
     }
     
@@ -214,7 +217,6 @@ pub const OptimizedFingerprints = struct {
     
     /// Clean up all ISPC fingerprint optimization caches
     pub fn cleanup() void {
-        extern "ispc_free_optimized_fingerprint_caches" fn ispc_free_optimized_fingerprint_caches() void;
         ispc_free_optimized_fingerprint_caches();
     }
     

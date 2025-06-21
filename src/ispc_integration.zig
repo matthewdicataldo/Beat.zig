@@ -5,6 +5,15 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+// ISPC extern function declarations
+extern fn ispc_free_fingerprint_cache() void;
+extern fn ispc_free_batch_formation_cache() void;
+extern fn ispc_free_worker_selection_cache() void;
+extern fn ispc_free_batch_optimization_state() void;
+extern fn ispc_free_similarity_matrix_cache() void;
+extern fn ispc_free_worker_scoring_cache() void;
+extern fn ispc_initialize_runtime() void;
+
 /// ISPC integration configuration and utilities
 pub const ISPC = struct {
     /// Represents ISPC varying data - a collection of values processed in parallel
@@ -246,7 +255,6 @@ pub const Kernels = struct {
         
         /// Clean up any internal ISPC state for fingerprint operations
         pub fn cleanup() void {
-            extern "ispc_free_fingerprint_cache" fn ispc_free_fingerprint_cache() void;
             ispc_free_fingerprint_cache();
         }
     };
@@ -283,7 +291,6 @@ pub const Kernels = struct {
         
         /// Clean up batch optimization internal state
         pub fn cleanup() void {
-            extern "ispc_free_batch_formation_cache" fn ispc_free_batch_formation_cache() void;
             ispc_free_batch_formation_cache();
         }
     };
@@ -323,7 +330,6 @@ pub const Kernels = struct {
         
         /// Clean up worker selection internal caches
         pub fn cleanup() void {
-            extern "ispc_free_worker_selection_cache" fn ispc_free_worker_selection_cache() void;
             ispc_free_worker_selection_cache();
         }
     };
@@ -390,10 +396,6 @@ pub const RuntimeManagement = struct {
     /// Clean up specific batch operation allocations
     pub fn cleanupBatchAllocations() void {
         // These functions handle cleanup of internal batch processing state
-        extern "ispc_free_batch_optimization_state" fn ispc_free_batch_optimization_state() void;
-        extern "ispc_free_similarity_matrix_cache" fn ispc_free_similarity_matrix_cache() void;
-        extern "ispc_free_worker_scoring_cache" fn ispc_free_worker_scoring_cache() void;
-        
         ispc_free_batch_optimization_state();
         ispc_free_similarity_matrix_cache();
         ispc_free_worker_scoring_cache();
@@ -401,7 +403,6 @@ pub const RuntimeManagement = struct {
     
     /// Initialize ISPC runtime (should be called once)
     pub fn initializeISPCRuntime() void {
-        extern "ispc_initialize_runtime" fn ispc_initialize_runtime() void;
         ispc_initialize_runtime();
     }
 };

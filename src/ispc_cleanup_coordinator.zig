@@ -3,6 +3,23 @@
 
 const std = @import("std");
 
+// ISPC extern function declarations
+extern fn ispc_free_prediction_caches() void;
+extern fn ispc_free_one_euro_filter_pools() void;
+extern fn ispc_free_multi_factor_confidence_state() void;
+extern fn ispc_free_simd_capability_cache() void;
+extern fn ispc_free_vectorized_queue_state() void;
+extern fn ispc_free_alignment_buffers() void;
+extern fn ispc_free_batch_fingerprint_state() void;
+extern fn ispc_free_batch_worker_scoring_state() void;
+extern fn ispc_free_batch_optimization_buffers() void;
+extern fn ispc_cleanup_task_parallelism() void;
+extern fn ispc_free_async_work_queues() void;
+extern fn ispc_reset_launch_sync_state() void;
+extern fn ispc_shutdown_runtime() void;
+extern fn ispc_verify_no_leaks() bool;
+extern fn ispc_force_garbage_collection() void;
+
 /// Centralized ISPC cleanup coordinator
 pub const ISPCCleanupCoordinator = struct {
     allocator: std.mem.Allocator,
@@ -55,10 +72,6 @@ pub const ISPCCleanupCoordinator = struct {
         ispc_prediction.deinitGlobalAccelerator();
         
         // Clean up prediction-specific ISPC state
-        extern "ispc_free_prediction_caches" fn ispc_free_prediction_caches() void;
-        extern "ispc_free_one_euro_filter_pools" fn ispc_free_one_euro_filter_pools() void;
-        extern "ispc_free_multi_factor_confidence_state" fn ispc_free_multi_factor_confidence_state() void;
-        
         ispc_free_prediction_caches();
         ispc_free_one_euro_filter_pools();
         ispc_free_multi_factor_confidence_state();
@@ -79,10 +92,6 @@ pub const ISPCCleanupCoordinator = struct {
         ispc_optimized.OptimizedFingerprints.cleanup();
         
         // Clean up SIMD-specific ISPC state
-        extern "ispc_free_simd_capability_cache" fn ispc_free_simd_capability_cache() void;
-        extern "ispc_free_vectorized_queue_state" fn ispc_free_vectorized_queue_state() void;
-        extern "ispc_free_alignment_buffers" fn ispc_free_alignment_buffers() void;
-        
         ispc_free_simd_capability_cache();
         ispc_free_vectorized_queue_state();
         ispc_free_alignment_buffers();
@@ -99,10 +108,6 @@ pub const ISPCCleanupCoordinator = struct {
         ispc_integration.RuntimeManagement.cleanupBatchAllocations();
         
         // Clean up kernel-specific batch state
-        extern "ispc_free_batch_fingerprint_state" fn ispc_free_batch_fingerprint_state() void;
-        extern "ispc_free_batch_worker_scoring_state" fn ispc_free_batch_worker_scoring_state() void;
-        extern "ispc_free_batch_optimization_buffers" fn ispc_free_batch_optimization_buffers() void;
-        
         ispc_free_batch_fingerprint_state();
         ispc_free_batch_worker_scoring_state();
         ispc_free_batch_optimization_buffers();
@@ -119,10 +124,6 @@ pub const ISPCCleanupCoordinator = struct {
         ispc_integration.RuntimeManagement.cleanupISPCRuntime();
         
         // Clean up task parallelism system (launch/sync)
-        extern "ispc_cleanup_task_parallelism" fn ispc_cleanup_task_parallelism() void;
-        extern "ispc_free_async_work_queues" fn ispc_free_async_work_queues() void;
-        extern "ispc_reset_launch_sync_state" fn ispc_reset_launch_sync_state() void;
-        
         ispc_cleanup_task_parallelism();
         ispc_free_async_work_queues();
         ispc_reset_launch_sync_state();
@@ -134,10 +135,6 @@ pub const ISPCCleanupCoordinator = struct {
         std.log.debug("Performing final ISPC cleanup...", .{});
         
         // Final comprehensive cleanup
-        extern "ispc_shutdown_runtime" fn ispc_shutdown_runtime() void;
-        extern "ispc_verify_no_leaks" fn ispc_verify_no_leaks() bool;
-        extern "ispc_force_garbage_collection" fn ispc_force_garbage_collection() void;
-        
         // Force any remaining cleanup
         ispc_force_garbage_collection();
         

@@ -7,11 +7,15 @@ const builtin = @import("builtin");
 const ispc_integration = @import("ispc_integration.zig");
 
 // External ISPC kernel function declarations
-extern "ispc_detect_simd_capabilities" fn ispc_detect_simd_capabilities(
+extern fn ispc_detect_simd_capabilities(
     capabilities: [*]SIMDCapability,
     max_capabilities: i32,
     detected_count: *i32,
 ) void;
+extern fn ispc_free_worker_registry_state() void;
+extern fn ispc_free_simd_queue_state() void;
+extern fn ispc_cleanup_all_simd_resources() void;
+extern fn ispc_reset_simd_system() void;
 
 extern "ispc_get_optimal_vector_length" fn ispc_get_optimal_vector_length(
     instruction_set: i32,
@@ -301,7 +305,6 @@ pub const SIMDWorkerRegistry = struct {
         self.allocator.free(self.worker_capabilities);
         
         // Clean up ISPC worker registry internal state
-        extern "ispc_free_worker_registry_state" fn ispc_free_worker_registry_state() void;
         ispc_free_worker_registry_state();
     }
 
@@ -366,6 +369,7 @@ pub const SIMDWorkerRegistry = struct {
         var data_type_sizes = try self.allocator.alloc(i32, self.worker_count);
         errdefer self.allocator.free(data_type_sizes);
         
+        // Output buffer for ISPC function (mutated externally)
         var scores = try self.allocator.alloc(f32, self.worker_count);
         errdefer self.allocator.free(scores);
         
@@ -375,7 +379,9 @@ pub const SIMDWorkerRegistry = struct {
             data_type_sizes[i] = @as(i32, @intCast(data_type.getSize()));
         }
 
-        // Use ISPC kernel for parallel scoring
+        // Use ISPC kernel for parallel scoring (will mutate scores buffer)
+        // Note: @memset to mark buffer as mutated for compiler
+        @memset(scores, 0.0);  // Pre-initialize before ISPC writes to it
         ispc_score_worker_capabilities(
             self.worker_capabilities.ptr,
             required_widths.ptr,
@@ -446,7 +452,6 @@ pub const SIMDQueue = struct {
         self.allocator.free(self.queue);
         
         // Clean up ISPC queue optimization state
-        extern "ispc_free_simd_queue_state" fn ispc_free_simd_queue_state() void;
         ispc_free_simd_queue_state();
     }
 
@@ -539,9 +544,6 @@ pub fn validateISPCPerformance(allocator: std.mem.Allocator) !void {
 /// Global cleanup for all ISPC SIMD wrapper resources
 pub fn cleanupAllISPCResources() void {
     // Clean up all ISPC-managed resources across all modules
-    extern "ispc_cleanup_all_simd_resources" fn ispc_cleanup_all_simd_resources() void;
-    extern "ispc_reset_simd_system" fn ispc_reset_simd_system() void;
-    
     ispc_cleanup_all_simd_resources();
     ispc_reset_simd_system();
 }

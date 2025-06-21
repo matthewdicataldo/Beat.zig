@@ -385,7 +385,7 @@ Progress tracking for addressing identified issues, ordered from easiest to hard
 - [x] Replace `WorkStealingDeque.pushBottom` assert with `!void` error return
 
 ### Performance Optimizations (Medium-High Effort)
-- [ ] Add exponential back-off to work-stealing busy-wait loops
+- [x] Add exponential back-off to work-stealing busy-wait loops (✅ IMPLEMENTED & COMPILES)
 - [ ] Insert `std.Thread.yield` in `MpmcQueue.enqueue` spin loops
 - [ ] Implement free-list bitmap for `SlabAllocator.free` O(n) operations
 - [ ] Make heartbeat timing adaptive to observed queue lengths

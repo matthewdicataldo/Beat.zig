@@ -385,6 +385,84 @@ pub const ThreadPool = struct {
     
     const Self = @This();
     
+    /// Exponential back-off state for intelligent work-stealing
+    const StealBackOff = struct {
+        consecutive_failures: u32 = 0,
+        last_success_time: u64 = 0,
+        
+        const MIN_DELAY_NS: u64 = 100;              // 100ns minimum (very fast)
+        const MAX_DELAY_NS: u64 = 10_000_000;       // 10ms maximum (reasonable for responsiveness)
+        const BACKOFF_MULTIPLIER: u32 = 2;          // Double delay on each failure
+        const SUCCESS_RESET_THRESHOLD: u64 = 1_000_000_000; // 1 second
+        
+        /// Calculate the current back-off delay in nanoseconds
+        pub fn getCurrentDelay(self: *const StealBackOff) u64 {
+            if (self.consecutive_failures == 0) return 0;
+            
+            // Exponential back-off: MIN_DELAY * (MULTIPLIER ^ failures)
+            var delay = MIN_DELAY_NS;
+            for (0..@min(self.consecutive_failures, 20)) |_| { // Cap at 20 to prevent overflow
+                delay = @min(delay * BACKOFF_MULTIPLIER, MAX_DELAY_NS);
+            }
+            return delay;
+        }
+        
+        /// Record a failed steal attempt
+        pub fn recordFailure(self: *StealBackOff) void {
+            self.consecutive_failures = @min(self.consecutive_failures + 1, 30); // Cap to prevent overflow
+        }
+        
+        /// Record a successful steal
+        pub fn recordSuccess(self: *StealBackOff) void {
+            self.consecutive_failures = 0;
+            self.last_success_time = @as(u64, @intCast(std.time.nanoTimestamp()));
+        }
+        
+        /// Reset back-off if it's been too long since last success (handles long idle periods)
+        pub fn maybeReset(self: *StealBackOff) void {
+            if (self.last_success_time > 0) {
+                const current_time = @as(u64, @intCast(std.time.nanoTimestamp()));
+                if (current_time - self.last_success_time > SUCCESS_RESET_THRESHOLD) {
+                    self.consecutive_failures = @max(1, self.consecutive_failures / 2); // Gradual reset
+                }
+            }
+        }
+        
+        /// Perform the back-off delay with platform-optimized sleep
+        pub fn performBackOff(self: *const StealBackOff) void {
+            const delay = self.getCurrentDelay();
+            if (delay == 0) return;
+            
+            if (delay < 1000) {
+                // Very short delays: use CPU pause/spin for minimal latency
+                performShortSpin(delay);
+            } else if (delay < 100_000) {
+                // Short delays: use thread yield for cooperative scheduling
+                std.Thread.yield() catch {
+                    // Fallback to short spin if yield fails
+                    performShortSpin(delay);
+                };
+            } else {
+                // Longer delays: use nanosecond-precision sleep
+                std.time.sleep(delay);
+            }
+        }
+        
+        /// Platform-optimized short spinning for minimal delays
+        fn performShortSpin(target_ns: u64) void {
+            const cycles_per_ns = 3; // Rough estimate: ~3 GHz CPU
+            const target_cycles = target_ns * cycles_per_ns;
+            
+            // Use compiler-friendly busy loop that can be optimized per platform
+            var i: u64 = 0;
+            while (i < target_cycles) : (i += 1) {
+                // Platform-specific pause instruction would go here
+                // For now, use a simple memory barrier
+                std.atomic.compilerFence(.acquire);
+            }
+        }
+    };
+    
     pub const Worker = struct {
         id: u32,
         thread: std.Thread,
@@ -403,6 +481,9 @@ pub const ThreadPool = struct {
         
         // Continuation support
         continuation_registry: ?*continuation.ContinuationRegistry = null,
+        
+        // Exponential back-off for work-stealing efficiency
+        steal_back_off: StealBackOff = StealBackOff{},
     };
     
     const MutexQueue = struct {
@@ -1349,10 +1430,16 @@ pub const ThreadPool = struct {
         }
         
         while (worker.pool.running.load(.acquire)) {
+            // Check for back-off reset (handles long idle periods gracefully)
+            worker.steal_back_off.maybeReset();
+            
             // Try to get work (tasks or continuations)
             const work_item = getWork(worker);
             
             if (work_item) |item| {
+                // Reset back-off on successful work acquisition
+                worker.steal_back_off.recordSuccess();
+                
                 coz.latencyBegin(coz.Points.task_execution);
                 
                 // Execute work item based on type
@@ -1382,11 +1469,14 @@ pub const ThreadPool = struct {
                 worker.pool.stats.recordComplete();
                 coz.throughput(coz.Points.task_completed);
             } else {
+                // No work found - record failure and perform intelligent back-off
+                worker.steal_back_off.recordFailure();
+                
                 coz.throughput(coz.Points.worker_idle);
-                // Sleep briefly to avoid busy-waiting
-                // Using 5ms sleep to reduce CPU usage while maintaining reasonable responsiveness
-                // This reduces idle CPU from ~13% to ~3% with minimal impact on latency
-                std.time.sleep(5 * std.time.ns_per_ms);
+                
+                // Perform adaptive exponential back-off instead of fixed 5ms sleep
+                // This dynamically adjusts from 100ns to 10ms based on contention level
+                worker.steal_back_off.performBackOff();
             }
         }
     }
@@ -1591,7 +1681,7 @@ pub const ThreadPool = struct {
         std.sort.insertion(@TypeOf(candidate_preferences[0]), candidate_preferences[0..candidates.len], {}, CandidateSort.lessThan);
         
         // Try stealing from sorted candidates (best NUMA locality first)
-        for (candidate_preferences[0..candidates.len]) |candidate_pref| {
+        for (candidate_preferences[0..candidates.len], 0..) |candidate_pref, attempt_idx| {
             const victim = &self.workers[candidate_pref.id];
             
             switch (victim.queue) {
@@ -1614,6 +1704,14 @@ pub const ThreadPool = struct {
                     }
                 },
             }
+            
+            // Add micro-delay between steal attempts to reduce cache line bouncing
+            // Only after failed attempts and not on the last candidate
+            if (attempt_idx > 0 and attempt_idx < candidates.len - 1) {
+                // Very short pause to allow cache lines to settle
+                // This reduces contention when multiple workers are stealing simultaneously
+                StealBackOff.performShortSpin(50); // 50ns pause
+            }
         }
         
         return null;
@@ -1621,6 +1719,8 @@ pub const ThreadPool = struct {
     
     fn stealWorkRandom(self: *Self, worker: *Worker) ?lockfree.WorkItem {
         // Fallback to random stealing when topology is not available
+        // Note: This only tries one random victim, so no micro-delays needed here
+        // The main exponential back-off happens in the worker loop for failed steal attempts
         const victim_id = std.crypto.random.uintLessThan(usize, self.workers.len);
         if (victim_id == worker.id) return null;
         
