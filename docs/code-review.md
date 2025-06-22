@@ -403,7 +403,7 @@ Progress tracking for addressing identified issues, ordered from easiest to hard
 - [x] Consolidate `build_opts` and `build_opts_new` into single configuration source (✅ UNIFIED CONFIG - single source of truth with smart strategy detection)
 - [x] Move shared `PredictiveConfig` to dedicated module (✅ SHARED MODULE - eliminated duplication between predictive modules)
 - [x] Implement unified logical → physical NUMA mapping layer (✅ NUMA MAPPING LAYER - eliminates physical vs logical NUMA indexing inconsistencies)
-- [ ] Create shared `TaskExecutionStats` module for predictor components
+- [x] Create shared `TaskExecutionStats` module for predictor components (✅ UNIFIED TASK STATS - eliminates duplication and conflicting promotion decisions)
 - [ ] Build unified optimization DAG for Souper/ISPC/Minotaur coordination
 
 ### System Integration (Highest Effort)
