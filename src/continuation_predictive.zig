@@ -6,6 +6,7 @@ const scheduler = @import("scheduler.zig");
 const fingerprint = @import("fingerprint.zig");
 const predictive_accounting = @import("predictive_accounting.zig");
 const intelligent_decision = @import("intelligent_decision.zig");
+const predictive_config = @import("predictive_config.zig");
 
 // ============================================================================
 // Predictive Accounting Integration for Continuation Stealing
@@ -39,7 +40,7 @@ pub const ContinuationPredictiveAccounting = struct {
     adaptive_numa_enabled: bool,
     
     /// Initialize predictive accounting for continuations
-    pub fn init(allocator: std.mem.Allocator, config: PredictiveConfig) !Self {
+    pub fn init(allocator: std.mem.Allocator, config: predictive_config.PredictiveConfig) !Self {
         return Self{
             .allocator = allocator,
             .one_euro_filter = scheduler.OneEuroFilter.init(
@@ -336,37 +337,9 @@ pub const ContinuationPredictiveAccounting = struct {
     }
 };
 
-/// Configuration for continuation predictive accounting
-pub const PredictiveConfig = struct {
-    // One Euro Filter parameters
-    min_cutoff: f32 = 0.1,
-    beta: f32 = 0.05,
-    d_cutoff: f32 = 1.0,
-    
-    // Velocity filter parameters (more stable)
-    velocity_min_cutoff: f32 = 0.05,
-    velocity_beta: f32 = 0.01,
-    velocity_d_cutoff: f32 = 0.5,
-    
-    // Prediction parameters
-    confidence_threshold: f32 = 0.5,
-    enable_adaptive_numa: bool = true,
-    
-    /// Create balanced configuration for general use
-    pub fn balanced() PredictiveConfig {
-        return PredictiveConfig{};
-    }
-    
-    /// Create performance-optimized configuration
-    pub fn performanceOptimized() PredictiveConfig {
-        return PredictiveConfig{
-            .min_cutoff = 0.05,
-            .beta = 0.1,
-            .confidence_threshold = 0.3,
-            .enable_adaptive_numa = true,
-        };
-    }
-};
+// PredictiveConfig is now imported from the shared predictive_config module
+// to prevent duplication and configuration drift between modules
+pub const PredictiveConfig = predictive_config.PredictiveConfig;
 
 /// Execution profile for continuation prediction
 const ExecutionProfile = struct {

@@ -3,6 +3,7 @@ const continuation = @import("continuation.zig");
 const continuation_unified = @import("continuation_unified.zig");
 const continuation_simd = @import("continuation_simd.zig");
 const scheduler = @import("scheduler.zig");
+const predictive_config = @import("predictive_config.zig");
 
 // ============================================================================
 // Predictive Accounting Compatibility Layer
@@ -45,37 +46,9 @@ pub const PredictionResult = struct {
     }
 };
 
-/// Configuration for continuation predictive accounting - exact API compatibility
-pub const PredictiveConfig = struct {
-    // One Euro Filter parameters
-    min_cutoff: f32 = 0.1,
-    beta: f32 = 0.05,
-    d_cutoff: f32 = 1.0,
-    
-    // Velocity filter parameters (more stable)
-    velocity_min_cutoff: f32 = 0.05,
-    velocity_beta: f32 = 0.01,
-    velocity_d_cutoff: f32 = 0.5,
-    
-    // Prediction parameters
-    confidence_threshold: f32 = 0.5,
-    enable_adaptive_numa: bool = true,
-    
-    /// Create balanced configuration for general use
-    pub fn balanced() PredictiveConfig {
-        return PredictiveConfig{};
-    }
-    
-    /// Create performance-optimized configuration
-    pub fn performanceOptimized() PredictiveConfig {
-        return PredictiveConfig{
-            .min_cutoff = 0.05,
-            .beta = 0.1,
-            .confidence_threshold = 0.3,
-            .enable_adaptive_numa = true,
-        };
-    }
-};
+/// Configuration for continuation predictive accounting - now using shared module
+/// This maintains exact API compatibility while eliminating duplication
+pub const PredictiveConfig = predictive_config.PredictiveConfig;
 
 /// Performance statistics for predictive accounting - exact API compatibility
 pub const PredictiveAccountingStats = struct {
