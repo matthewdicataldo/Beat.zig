@@ -404,7 +404,7 @@ Progress tracking for addressing identified issues, ordered from easiest to hard
 - [x] Move shared `PredictiveConfig` to dedicated module (✅ SHARED MODULE - eliminated duplication between predictive modules)
 - [x] Implement unified logical → physical NUMA mapping layer (✅ NUMA MAPPING LAYER - eliminates physical vs logical NUMA indexing inconsistencies)
 - [x] Create shared `TaskExecutionStats` module for predictor components (✅ UNIFIED TASK STATS - eliminates duplication and conflicting promotion decisions)
-- [ ] Build unified optimization DAG for Souper/ISPC/Minotaur coordination
+- [x] Build unified optimization DAG for Souper/ISPC/Minotaur coordination (✅ UNIFIED OPTIMIZATION DAG - central registry, orchestrator, and conflict resolution)
 
 ### System Integration (Highest Effort)
 - [ ] Create top-level `RuntimeContext` for deterministic resource lifecycle
