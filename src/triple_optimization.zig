@@ -159,6 +159,10 @@ pub const TripleOptimizationEngine = struct {
     minotaur: ?MinotaurIntegration,
     ispc: ?ISPCIntegration,
     
+    /// Thread-safety for LLVM API access
+    llvm_mutex: std.Thread.Mutex,
+    optimization_mutex: std.Thread.Mutex,
+    
     /// Combined statistics
     total_optimizations_found: std.atomic.Value(u64),
     total_optimizations_applied: std.atomic.Value(u64),
@@ -170,6 +174,10 @@ pub const TripleOptimizationEngine = struct {
     spmd_optimizations: std.atomic.Value(u32),
     cross_optimizations: std.atomic.Value(u32),
     
+    /// LLVM operation tracking for debugging
+    concurrent_llvm_operations: std.atomic.Value(u32),
+    llvm_lock_contentions: std.atomic.Value(u64),
+    
     pub fn init(allocator: std.mem.Allocator, config: TripleOptimizationConfig) !TripleOptimizationEngine {
         var engine = TripleOptimizationEngine{
             .config = config,
@@ -177,6 +185,8 @@ pub const TripleOptimizationEngine = struct {
             .souper = null,
             .minotaur = null,
             .ispc = null,
+            .llvm_mutex = std.Thread.Mutex{},
+            .optimization_mutex = std.Thread.Mutex{},
             .total_optimizations_found = std.atomic.Value(u64).init(0),
             .total_optimizations_applied = std.atomic.Value(u64).init(0),
             .total_cycles_saved = std.atomic.Value(u64).init(0),
@@ -184,6 +194,8 @@ pub const TripleOptimizationEngine = struct {
             .simd_optimizations = std.atomic.Value(u32).init(0),
             .spmd_optimizations = std.atomic.Value(u32).init(0),
             .cross_optimizations = std.atomic.Value(u32).init(0),
+            .concurrent_llvm_operations = std.atomic.Value(u32).init(0),
+            .llvm_lock_contentions = std.atomic.Value(u64).init(0),
         };
         
         // Initialize individual engines based on configuration
@@ -269,7 +281,128 @@ pub const TripleOptimizationEngine = struct {
         return result;
     }
     
-    /// Get comprehensive statistics from all optimization engines
+    // ========================================================================
+    // Thread-Safe LLVM Operation Wrappers
+    // ========================================================================
+    
+    /// Thread-safe wrapper for Souper scalar optimizations
+    fn optimizeScalarCodeSafe(self: *TripleOptimizationEngine, souper: *SouperIntegration) !?OptimizationResults {
+        // Track contention for performance monitoring
+        const was_locked = self.llvm_mutex.tryLock();
+        if (!was_locked) {
+            _ = self.llvm_lock_contentions.fetchAdd(1, .monotonic);
+        }
+        
+        self.llvm_mutex.lock();
+        defer self.llvm_mutex.unlock();
+        
+        // Track concurrent operations for debugging
+        const concurrent_ops = self.concurrent_llvm_operations.fetchAdd(1, .monotonic);
+        defer _ = self.concurrent_llvm_operations.fetchSub(1, .monotonic);
+        
+        // Log potential issues if many operations are queued
+        if (concurrent_ops > 5) {
+            std.log.warn("High LLVM operation contention: {} operations queued", .{concurrent_ops});
+        }
+        
+        std.log.debug("Starting thread-safe Souper optimization (queued operations: {})", .{concurrent_ops});
+        
+        // Execute the actual LLVM operation under protection
+        const start_time = std.time.nanoTimestamp();
+        const result = souper.optimizeScalarCode() catch |err| {
+            std.log.err("Souper optimization failed: {}", .{err});
+            return err;
+        };
+        
+        const duration_ms = (@as(u64, @intCast(std.time.nanoTimestamp() - start_time))) / 1_000_000;
+        std.log.debug("Souper optimization completed in {}ms", .{duration_ms});
+        
+        return result;
+    }
+    
+    /// Thread-safe wrapper for Minotaur SIMD optimizations  
+    fn optimizeSIMDCodeSafe(self: *TripleOptimizationEngine, minotaur: *MinotaurIntegration) !?OptimizationResults {
+        // Track contention for performance monitoring
+        const was_locked = self.llvm_mutex.tryLock();
+        if (!was_locked) {
+            _ = self.llvm_lock_contentions.fetchAdd(1, .monotonic);
+        }
+        
+        self.llvm_mutex.lock();
+        defer self.llvm_mutex.unlock();
+        
+        // Track concurrent operations for debugging  
+        const concurrent_ops = self.concurrent_llvm_operations.fetchAdd(1, .monotonic);
+        defer _ = self.concurrent_llvm_operations.fetchSub(1, .monotonic);
+        
+        std.log.debug("Starting thread-safe Minotaur SIMD optimization (queued operations: {})", .{concurrent_ops});
+        
+        // Execute the actual LLVM operation under protection
+        const start_time = std.time.nanoTimestamp();
+        const result = self.optimizeSIMDCode(minotaur) catch |err| {
+            std.log.err("Minotaur SIMD optimization failed: {}", .{err});
+            return err;
+        };
+        
+        const duration_ms = (@as(u64, @intCast(std.time.nanoTimestamp() - start_time))) / 1_000_000;
+        std.log.debug("Minotaur SIMD optimization completed in {}ms", .{duration_ms});
+        
+        return result;
+    }
+    
+    /// Thread-safe wrapper for ISPC SPMD optimizations
+    fn optimizeSPMDCodeSafe(self: *TripleOptimizationEngine, ispc: *ISPCIntegration) !?OptimizationResults {
+        // Track contention for performance monitoring
+        const was_locked = self.llvm_mutex.tryLock();
+        if (!was_locked) {
+            _ = self.llvm_lock_contentions.fetchAdd(1, .monotonic);
+        }
+        
+        self.llvm_mutex.lock();
+        defer self.llvm_mutex.unlock();
+        
+        // Track concurrent operations for debugging
+        const concurrent_ops = self.concurrent_llvm_operations.fetchAdd(1, .monotonic);
+        defer _ = self.concurrent_llvm_operations.fetchSub(1, .monotonic);
+        
+        std.log.debug("Starting thread-safe ISPC SPMD optimization (queued operations: {})", .{concurrent_ops});
+        
+        // Execute the actual LLVM operation under protection
+        const start_time = std.time.nanoTimestamp();
+        const result = self.optimizeSPMDCode(ispc) catch |err| {
+            std.log.err("ISPC SPMD optimization failed: {}", .{err});
+            return err;
+        };
+        
+        const duration_ms = (@as(u64, @intCast(std.time.nanoTimestamp() - start_time))) / 1_000_000;
+        std.log.debug("ISPC SPMD optimization completed in {}ms", .{duration_ms});
+        
+        return result;
+    }
+    
+    /// Thread-safe wrapper for optimization verification
+    fn verifyOptimizationSafe(self: *TripleOptimizationEngine, optimization: anytype) !bool {
+        self.llvm_mutex.lock();
+        defer self.llvm_mutex.unlock();
+        
+        // Track verification operations
+        const concurrent_ops = self.concurrent_llvm_operations.fetchAdd(1, .monotonic);
+        defer _ = self.concurrent_llvm_operations.fetchSub(1, .monotonic);
+        
+        std.log.debug("Starting thread-safe optimization verification (queued operations: {})", .{concurrent_ops});
+        
+        // Execute LLVM verification under protection (placeholder implementation)
+        _ = optimization;
+        
+        // In a real implementation, this would:
+        // 1. Use LLVM's verifyModule() function
+        // 2. Run SMT solver verification for formal correctness
+        // 3. Perform semantic equivalence checking
+        
+        return true; // Placeholder - always verify as correct
+    }
+    
+    /// Get comprehensive statistics from all optimization engines with thread-safety metrics
     pub fn getStatistics(self: *const TripleOptimizationEngine) TripleOptimizationStatistics {
         var stats = TripleOptimizationStatistics{
             .total_optimizations_found = self.total_optimizations_found.load(.acquire),
@@ -282,6 +415,9 @@ pub const TripleOptimizationEngine = struct {
             .souper_stats = null,
             .minotaur_stats = null,
             .ispc_stats = null,
+            // Thread-safety statistics
+            .llvm_lock_contentions = self.llvm_lock_contentions.load(.acquire),
+            .concurrent_llvm_operations = self.concurrent_llvm_operations.load(.acquire),
         };
         
         // Collect individual engine statistics
@@ -300,59 +436,100 @@ pub const TripleOptimizationEngine = struct {
         return stats;
     }
     
+    /// Get thread-safety performance metrics for monitoring
+    pub fn getThreadSafetyMetrics(self: *const TripleOptimizationEngine) ThreadSafetyMetrics {
+        return ThreadSafetyMetrics{
+            .llvm_lock_contentions = self.llvm_lock_contentions.load(.acquire),
+            .current_concurrent_operations = self.concurrent_llvm_operations.load(.acquire),
+            .max_observed_queue_depth = 0, // Would track historical maximum
+            .total_llvm_operations = self.scalar_optimizations.load(.acquire) + 
+                                   self.simd_optimizations.load(.acquire) + 
+                                   self.spmd_optimizations.load(.acquire),
+        };
+    }
+    
     // Private implementation methods
     
     fn runSequentialOptimization(self: *TripleOptimizationEngine, report: *OptimizationReport) !void {
-        // Phase 1: Souper scalar optimization
+        std.log.info("Starting sequential triple optimization with LLVM thread-safety protection", .{});
+        
+        // Phase 1: Souper scalar optimization (thread-safe)
         if (self.souper) |*souper| {
-            const scalar_results = try souper.optimizeScalarCode();
+            std.log.debug("Phase 1: Starting Souper scalar optimization", .{});
+            const scalar_results = try self.optimizeScalarCodeSafe(souper);
             report.scalar_phase = scalar_results;
         }
         
-        // Phase 2: Minotaur SIMD optimization  
+        // Phase 2: Minotaur SIMD optimization (thread-safe)
         if (self.minotaur) |*minotaur| {
-            const simd_results = try self.optimizeSIMDCode(minotaur);
+            std.log.debug("Phase 2: Starting Minotaur SIMD optimization", .{});
+            const simd_results = try self.optimizeSIMDCodeSafe(minotaur);
             report.simd_phase = simd_results;
         }
         
-        // Phase 3: ISPC SPMD optimization
+        // Phase 3: ISPC SPMD optimization (thread-safe)
         if (self.ispc) |*ispc| {
-            const spmd_results = try self.optimizeSPMDCode(ispc);
+            std.log.debug("Phase 3: Starting ISPC SPMD optimization", .{});
+            const spmd_results = try self.optimizeSPMDCodeSafe(ispc);
             report.spmd_phase = spmd_results;
         }
+        
+        std.log.info("Sequential optimization completed successfully", .{});
     }
     
     fn runParallelOptimization(self: *TripleOptimizationEngine, report: *OptimizationReport) !void {
-        // Run all three optimizations in parallel
+        std.log.info("Starting parallel triple optimization with LLVM thread-safety protection", .{});
+        
+        // IMPORTANT: Due to LLVM's thread-safety limitations, we serialize the operations
+        // even in "parallel" mode to prevent race conditions and memory corruption
+        std.log.warn("LLVM thread-safety: Serializing parallel operations to prevent race conditions", .{});
+        
+        // Thread-safe parallel execution with mutex protection
         const ParallelTask = struct {
             engine: *TripleOptimizationEngine,
             report: *OptimizationReport,
             
             fn runSouper(task: @This()) void {
                 if (task.engine.souper) |*souper| {
-                    task.report.scalar_phase = souper.optimizeScalarCode() catch null;
+                    std.log.debug("Parallel task: Starting thread-safe Souper optimization", .{});
+                    task.report.scalar_phase = task.engine.optimizeScalarCodeSafe(souper) catch |err| {
+                        std.log.err("Parallel Souper optimization failed: {}", .{err});
+                        return;
+                    };
                 }
             }
             
             fn runMinotaur(task: @This()) void {
                 if (task.engine.minotaur) |*minotaur| {
-                    task.report.simd_phase = task.engine.optimizeSIMDCode(minotaur) catch null;
+                    std.log.debug("Parallel task: Starting thread-safe Minotaur optimization", .{});
+                    task.report.simd_phase = task.engine.optimizeSIMDCodeSafe(minotaur) catch |err| {
+                        std.log.err("Parallel Minotaur optimization failed: {}", .{err});
+                        return;
+                    };
                 }
             }
             
             fn runISPC(task: @This()) void {
                 if (task.engine.ispc) |*ispc| {
-                    task.report.spmd_phase = task.engine.optimizeSPMDCode(ispc) catch null;
+                    std.log.debug("Parallel task: Starting thread-safe ISPC optimization", .{});
+                    task.report.spmd_phase = task.engine.optimizeSPMDCodeSafe(ispc) catch |err| {
+                        std.log.err("Parallel ISPC optimization failed: {}", .{err});
+                        return;
+                    };
                 }
             }
         };
         
         const task = ParallelTask{ .engine = self, .report = report };
         
-        // Note: In a real implementation, these would run in parallel threads
+        // Execute with LLVM thread-safety protection
+        // Note: Actual parallelization would use std.Thread.spawn() but requires
+        // careful coordination due to LLVM's non-thread-safe APIs
         task.runSouper();
-        task.runMinotaur();
+        task.runMinotaur(); 
         task.runISPC();
+        
+        std.log.info("Parallel optimization completed with thread-safety protection", .{});
     }
     
     fn runAdaptiveOptimization(self: *TripleOptimizationEngine, report: *OptimizationReport) !void {
@@ -538,6 +715,60 @@ const TripleOptimizationStatistics = struct {
     souper_stats: ?SouperStatistics,
     minotaur_stats: ?MinotaurStatistics,
     ispc_stats: ?ISPCStatistics,
+    
+    // Thread-safety metrics
+    llvm_lock_contentions: u64,
+    concurrent_llvm_operations: u32,
+};
+
+/// Thread-safety performance metrics for LLVM operations monitoring
+pub const ThreadSafetyMetrics = struct {
+    /// Number of times threads had to wait for LLVM mutex
+    llvm_lock_contentions: u64,
+    
+    /// Current number of concurrent operations waiting
+    current_concurrent_operations: u32,
+    
+    /// Historical maximum observed queue depth for capacity planning
+    max_observed_queue_depth: u32,
+    
+    /// Total LLVM operations completed (all types)
+    total_llvm_operations: u64,
+    
+    /// Calculate contention ratio for performance analysis
+    pub fn getContentionRatio(self: ThreadSafetyMetrics) f32 {
+        if (self.total_llvm_operations == 0) return 0.0;
+        return @as(f32, @floatFromInt(self.llvm_lock_contentions)) / @as(f32, @floatFromInt(self.total_llvm_operations));
+    }
+    
+    /// Check if contention indicates performance issues
+    pub fn hasHighContention(self: ThreadSafetyMetrics) bool {
+        return self.getContentionRatio() > 0.1; // >10% contention ratio
+    }
+    
+    /// Get performance analysis report
+    pub fn getAnalysisReport(self: ThreadSafetyMetrics, allocator: std.mem.Allocator) ![]u8 {
+        const contention_ratio = self.getContentionRatio();
+        const contention_percent = contention_ratio * 100.0;
+        
+        return std.fmt.allocPrint(allocator, 
+            "LLVM Thread Safety Analysis:\n" ++
+            "  Total Operations: {}\n" ++
+            "  Lock Contentions: {}\n" ++
+            "  Contention Ratio: {d:.2}%\n" ++
+            "  Current Queue Depth: {}\n" ++
+            "  Max Queue Depth: {}\n" ++
+            "  Performance Status: {s}\n",
+            .{
+                self.total_llvm_operations,
+                self.llvm_lock_contentions,
+                contention_percent,
+                self.current_concurrent_operations,
+                self.max_observed_queue_depth,
+                if (self.hasHighContention()) "⚠️  High Contention" else "✅ Good"
+            }
+        );
+    }
 };
 
 // Placeholder types for ISPC integration

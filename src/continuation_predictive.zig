@@ -22,7 +22,10 @@ pub const ContinuationPredictiveAccounting = struct {
     one_euro_filter: scheduler.OneEuroFilter,
     velocity_filter: scheduler.OneEuroFilter,
     
-    // Continuation-specific execution tracking
+    // Thread-safe atomic prediction tracking (replaces unsafe HashMap)
+    atomic_counters: AtomicPredictionCounters,
+    
+    // Legacy fields for compatibility during migration
     execution_history: std.AutoHashMap(u64, ExecutionProfile),
     prediction_cache: PredictionCache,
     
@@ -49,6 +52,7 @@ pub const ContinuationPredictiveAccounting = struct {
                 config.velocity_beta,
                 config.velocity_d_cutoff
             ),
+            .atomic_counters = AtomicPredictionCounters.init(),
             .execution_history = std.AutoHashMap(u64, ExecutionProfile).init(allocator),
             .prediction_cache = try PredictionCache.init(allocator),
             .total_predictions = 0,
@@ -73,25 +77,34 @@ pub const ContinuationPredictiveAccounting = struct {
         const fingerprint_hash = cont.fingerprint_hash orelse 
             self.generateContinuationFingerprint(cont);
         
-        // Check prediction cache first
+        // Use atomic counters for thread-safe performance tracking
+        self.atomic_counters.recordMiss(fingerprint_hash); // Default to miss, will correct if cache hit
+        
+        // Check prediction cache first (legacy support)
         if (self.prediction_cache.get(fingerprint_hash)) |cached_prediction| {
             self.cache_hits += 1;
+            self.atomic_counters.recordHit(fingerprint_hash); // Correct the miss recorded above
             return self.enhancePredictionWithSIMD(cached_prediction, simd_class);
         }
+        
+        // Use atomic counter for average execution time if available
+        const atomic_avg_time = self.atomic_counters.getAverageExecutionTime(fingerprint_hash);
+        const atomic_confidence = self.atomic_counters.getConfidence(fingerprint_hash);
         
         // Get or create execution profile
         var profile = self.execution_history.get(fingerprint_hash) orelse ExecutionProfile.init();
         
         var prediction = PredictionResult{
-            .predicted_time_ns = 1000000, // 1ms default
-            .confidence = 0.0,
-            .numa_preference = cont.numa_node,
+            .predicted_time_ns = atomic_avg_time, // Use atomic counter average or default 1ms
+            .confidence = atomic_confidence,
+            .numa_preference = self.atomic_counters.getNumaPreference(fingerprint_hash) orelse cont.numa_node,
             .should_batch = false,
-            .prediction_source = .default,
+            .prediction_source = if (atomic_confidence > 0.0) .historical_filtered else .default,
         };
         
-        // If we have historical data, use One Euro Filter
-        if (profile.sample_count > 0) {
+        // If we have historical data, use One Euro Filter (prefer atomic data)
+        const should_use_legacy = profile.sample_count > 0 and atomic_confidence < 0.1;
+        if (should_use_legacy) {
             const current_time = @as(u64, @intCast(std.time.nanoTimestamp()));
             
             // Apply One Euro Filter to execution time
@@ -130,6 +143,9 @@ pub const ContinuationPredictiveAccounting = struct {
     pub fn updatePrediction(self: *Self, cont: *continuation.Continuation, actual_time_ns: u64) !void {
         const fingerprint_hash = cont.fingerprint_hash orelse return;
         
+        // Calculate prediction confidence for atomic recording
+        var confidence: f32 = 0.5; // Default confidence
+        
         // Get or create execution profile
         var profile = self.execution_history.get(fingerprint_hash) orelse ExecutionProfile.init();
         
@@ -148,6 +164,7 @@ pub const ContinuationPredictiveAccounting = struct {
             
             // Update accuracy tracking
             profile.updateAccuracy(was_accurate);
+            confidence = if (was_accurate) @min(1.0, cached_prediction.confidence + 0.1) else @max(0.0, cached_prediction.confidence - 0.1);
             
             // Update cache quality score for hybrid LFU+age algorithm
             self.prediction_cache.updateQualityScore(fingerprint_hash, was_accurate);
@@ -155,6 +172,17 @@ pub const ContinuationPredictiveAccounting = struct {
             if (was_accurate) {
                 self.accurate_predictions += 1;
             }
+        } else {
+            // If we don't have a cached prediction, confidence is based on sample count
+            confidence = self.calculateConfidence(&profile);
+        }
+        
+        // THREAD-SAFE: Record execution in atomic counters
+        self.atomic_counters.recordExecution(fingerprint_hash, actual_time_ns, confidence);
+        
+        // Record NUMA preference if available
+        if (cont.numa_node) |numa_node| {
+            self.atomic_counters.recordNumaPreference(fingerprint_hash, numa_node);
         }
         
         // Store updated profile
@@ -189,6 +217,11 @@ pub const ContinuationPredictiveAccounting = struct {
             .profiles_tracked = self.execution_history.count(),
             .current_confidence = self.one_euro_filter.getCurrentEstimate() orelse 0.0,
         };
+    }
+    
+    /// Get thread-safe atomic counter statistics (preferred over legacy stats)
+    pub fn getAtomicStats(self: *const Self) AtomicCacheStats {
+        return self.atomic_counters.getStats();
     }
     
     /// Get detailed cache performance statistics for hybrid LFU+age algorithm
@@ -409,7 +442,165 @@ pub const PredictionResult = struct {
     };
 };
 
-/// High-performance prediction cache with hybrid LFU + age eviction policy
+/// Lock-free atomic prediction tracking to replace unsafe HashMap cache
+/// Uses sharded atomic counters for thread-safe performance monitoring
+const AtomicPredictionCounters = struct {
+    // Sharded counters to prevent false sharing across cache lines
+    prediction_hits: [64]std.atomic.Value(u64) align(64),
+    prediction_misses: [64]std.atomic.Value(u64) align(64),
+    execution_time_totals: [128]std.atomic.Value(u64) align(64),  // Nanoseconds per task type
+    execution_counts: [128]std.atomic.Value(u64) align(64),     // Count per task type
+    confidence_scores: [64]std.atomic.Value(u64) align(64),     // Fixed-point confidence * 1000
+    numa_preferences: [32]std.atomic.Value(u64) align(64),      // NUMA node preferences per task class
+    
+    // Performance metrics
+    total_cache_accesses: std.atomic.Value(u64),
+    total_predictions_made: std.atomic.Value(u64),
+    
+    fn init() AtomicPredictionCounters {
+        var counters = AtomicPredictionCounters{
+            .prediction_hits = undefined,
+            .prediction_misses = undefined,
+            .execution_time_totals = undefined,
+            .execution_counts = undefined,
+            .confidence_scores = undefined,
+            .numa_preferences = undefined,
+            .total_cache_accesses = std.atomic.Value(u64).init(0),
+            .total_predictions_made = std.atomic.Value(u64).init(0),
+        };
+        
+        // Initialize all atomic arrays
+        for (&counters.prediction_hits) |*counter| {
+            counter.* = std.atomic.Value(u64).init(0);
+        }
+        for (&counters.prediction_misses) |*counter| {
+            counter.* = std.atomic.Value(u64).init(0);
+        }
+        for (&counters.execution_time_totals) |*counter| {
+            counter.* = std.atomic.Value(u64).init(0);
+        }
+        for (&counters.execution_counts) |*counter| {
+            counter.* = std.atomic.Value(u64).init(0);
+        }
+        for (&counters.confidence_scores) |*counter| {
+            counter.* = std.atomic.Value(u64).init(0);
+        }
+        for (&counters.numa_preferences) |*counter| {
+            counter.* = std.atomic.Value(u64).init(0);
+        }
+        
+        return counters;
+    }
+    
+    /// Record a cache hit for thread-safe statistics tracking
+    pub fn recordHit(self: *AtomicPredictionCounters, task_hash: u64) void {
+        const shard = task_hash % 64;
+        _ = self.prediction_hits[shard].fetchAdd(1, .monotonic);
+        _ = self.total_cache_accesses.fetchAdd(1, .monotonic);
+    }
+    
+    /// Record a cache miss for thread-safe statistics tracking  
+    pub fn recordMiss(self: *AtomicPredictionCounters, task_hash: u64) void {
+        const shard = task_hash % 64;
+        _ = self.prediction_misses[shard].fetchAdd(1, .monotonic);
+        _ = self.total_cache_accesses.fetchAdd(1, .monotonic);
+    }
+    
+    /// Record execution time for task-specific prediction averaging
+    pub fn recordExecution(self: *AtomicPredictionCounters, task_hash: u64, execution_time_ns: u64, confidence: f32) void {
+        const slot = task_hash % 128;
+        _ = self.execution_time_totals[slot].fetchAdd(execution_time_ns, .monotonic);
+        _ = self.execution_counts[slot].fetchAdd(1, .monotonic);
+        _ = self.total_predictions_made.fetchAdd(1, .monotonic);
+        
+        // Store confidence as fixed-point (0-1000)
+        const confidence_slot = task_hash % 64;
+        const fixed_point_confidence = @as(u64, @intFromFloat(confidence * 1000.0));
+        _ = self.confidence_scores[confidence_slot].store(fixed_point_confidence, .monotonic);
+    }
+    
+    /// Get average execution time for task type (thread-safe)
+    pub fn getAverageExecutionTime(self: *const AtomicPredictionCounters, task_hash: u64) u64 {
+        const slot = task_hash % 128;
+        const total_time = self.execution_time_totals[slot].load(.monotonic);
+        const count = self.execution_counts[slot].load(.monotonic);
+        return if (count > 0) total_time / count else 1_000_000; // 1ms default
+    }
+    
+    /// Get confidence score for task type (thread-safe)
+    pub fn getConfidence(self: *const AtomicPredictionCounters, task_hash: u64) f32 {
+        const confidence_slot = task_hash % 64;
+        const fixed_point = self.confidence_scores[confidence_slot].load(.monotonic);
+        return @as(f32, @floatFromInt(fixed_point)) / 1000.0;
+    }
+    
+    /// Record NUMA preference atomically
+    pub fn recordNumaPreference(self: *AtomicPredictionCounters, task_hash: u64, numa_node: u32) void {
+        const slot = task_hash % 32;
+        _ = self.numa_preferences[slot].store(numa_node, .monotonic);
+    }
+    
+    /// Get NUMA preference for task type
+    pub fn getNumaPreference(self: *const AtomicPredictionCounters, task_hash: u64) ?u32 {
+        const slot = task_hash % 32;
+        const preference = self.numa_preferences[slot].load(.monotonic);
+        return if (preference > 0) @as(u32, @intCast(preference)) else null;
+    }
+    
+    /// Get comprehensive statistics
+    pub fn getStats(self: *const AtomicPredictionCounters) AtomicCacheStats {
+        var total_hits: u64 = 0;
+        var total_misses: u64 = 0;
+        var total_confidence: u64 = 0;
+        var confidence_entries: u64 = 0;
+        
+        for (self.prediction_hits) |counter| {
+            total_hits += counter.load(.monotonic);
+        }
+        for (self.prediction_misses) |counter| {
+            total_misses += counter.load(.monotonic);
+        }
+        for (self.confidence_scores) |counter| {
+            const score = counter.load(.monotonic);
+            if (score > 0) {
+                total_confidence += score;
+                confidence_entries += 1;
+            }
+        }
+        
+        const total_accesses = total_hits + total_misses;
+        const hit_rate = if (total_accesses > 0) 
+            @as(f32, @floatFromInt(total_hits)) / @as(f32, @floatFromInt(total_accesses))
+        else 
+            0.0;
+            
+        const avg_confidence = if (confidence_entries > 0)
+            @as(f32, @floatFromInt(total_confidence)) / @as(f32, @floatFromInt(confidence_entries)) / 1000.0
+        else
+            0.0;
+        
+        return AtomicCacheStats{
+            .total_hits = total_hits,
+            .total_misses = total_misses,
+            .hit_rate = hit_rate,
+            .avg_confidence = avg_confidence,
+            .total_predictions = self.total_predictions_made.load(.monotonic),
+            .total_accesses = self.total_cache_accesses.load(.monotonic),
+        };
+    }
+};
+
+const AtomicCacheStats = struct {
+    total_hits: u64,
+    total_misses: u64,
+    hit_rate: f32,
+    avg_confidence: f32,
+    total_predictions: u64,
+    total_accesses: u64,
+};
+
+/// Legacy PredictionCache compatibility layer for gradual migration
+/// THIS IS DEPRECATED - Use AtomicPredictionCounters for new code
 const PredictionCache = struct {
     const CacheEntry = struct {
         prediction: PredictionResult,

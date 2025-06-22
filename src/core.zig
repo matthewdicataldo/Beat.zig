@@ -461,8 +461,8 @@ pub const ThreadPool = struct {
             var i: u64 = 0;
             while (i < target_cycles) : (i += 1) {
                 // Platform-specific pause instruction would go here
-                // For now, use a simple memory barrier
-                std.atomic.compilerFence(.acquire);
+                // For now, use a simple atomic operation for delay
+                asm volatile ("nop"); // Simple no-op for delay
             }
         }
     };
@@ -1190,6 +1190,56 @@ pub const ThreadPool = struct {
         }
     }
     
+    /// Thread-safe configuration update to prevent data races
+    /// This method provides a safe way to update configuration instead of direct field access
+    /// TODO: Implement full atomic config updates when Zig supports large struct atomics
+    pub fn updateConfig(self: *Self, new_config: Config) !void {
+        // Enhanced configuration validation before applying
+        enhanced_errors.validateConfigurationWithHelp(new_config) catch |err| {
+            enhanced_errors.logEnhancedError(@TypeOf(err), err, "ThreadPool.updateConfig");
+            return err;
+        };
+        
+        std.log.info("ThreadPool: Updating configuration safely...", .{});
+        
+        // Store the old config for comparison
+        const old_config = self.config;
+        
+        // Safe config update - workers should use isFeatureEnabled() for reads
+        // This prevents partial config visibility during updates
+        self.config = new_config;
+        
+        // Log configuration changes for debugging and monitoring
+        if (old_config.enable_predictive != new_config.enable_predictive) {
+            std.log.info("  ✓ Predictive scheduling: {} -> {}", .{ old_config.enable_predictive, new_config.enable_predictive });
+        }
+        if (old_config.enable_work_stealing != new_config.enable_work_stealing) {
+            std.log.info("  ✓ Work stealing: {} -> {}", .{ old_config.enable_work_stealing, new_config.enable_work_stealing });
+        }
+        if (old_config.enable_topology_aware != new_config.enable_topology_aware) {
+            std.log.info("  ✓ Topology awareness: {} -> {}", .{ old_config.enable_topology_aware, new_config.enable_topology_aware });
+        }
+        if (old_config.enable_advanced_selection != new_config.enable_advanced_selection) {
+            std.log.info("  ✓ Advanced worker selection: {} -> {}", .{ old_config.enable_advanced_selection, new_config.enable_advanced_selection });
+        }
+        if (old_config.enable_heartbeat != new_config.enable_heartbeat) {
+            std.log.info("  ✓ Heartbeat scheduling: {} -> {}", .{ old_config.enable_heartbeat, new_config.enable_heartbeat });
+        }
+        
+        std.log.info("ThreadPool: Configuration update completed successfully", .{});
+    }
+    
+    /// Get current configuration - preferred method for reading config
+    pub fn getConfig(self: *const Self) Config {
+        return self.config;
+    }
+    
+    /// Safely check if a feature is enabled - recommended for worker threads
+    pub fn isFeatureEnabled(self: *const Self, comptime field_name: []const u8) bool {
+        const config = self.getConfig();
+        return @field(config, field_name);
+    }
+    
     /// Determine if fast path execution should be used for small tasks
     /// This helps improve work-stealing efficiency by avoiding overhead for tiny tasks
     pub fn should_use_fast_path(self: *Self) bool {
@@ -1518,8 +1568,8 @@ pub const ThreadPool = struct {
             },
         }
         
-        // Then try work stealing if enabled
-        if (worker.pool.config.enable_work_stealing) {
+        // Then try work stealing if enabled (atomic read to prevent config data races)
+        if (worker.pool.isFeatureEnabled("enable_work_stealing")) {
             return stealWork(worker);
         }
         

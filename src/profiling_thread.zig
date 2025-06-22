@@ -46,7 +46,7 @@ pub const ProfilingThread = struct {
     allocator: std.mem.Allocator,
     
     // Profiling state
-    task_profiles: std.HashMap(u64, TaskProfileAccumulator, std.hash_map.DefaultHashContext, std.heap.page_allocator),
+    task_profiles: std.AutoHashMap(u64, TaskProfileAccumulator),
     processing_batch_size: u32 = 32,
     low_priority_sleep_ns: u64 = 1_000_000, // 1ms between processing cycles
     
@@ -97,7 +97,7 @@ pub const ProfilingThread = struct {
         return Self{
             .allocator = allocator,
             .event_queue = lockfree.MpmcQueue(ProfilingEvent, 1024).init(),
-            .task_profiles = std.HashMap(u64, TaskProfileAccumulator, std.hash_map.DefaultHashContext, std.heap.page_allocator).init(allocator),
+            .task_profiles = std.AutoHashMap(u64, TaskProfileAccumulator).init(allocator),
         };
     }
     
