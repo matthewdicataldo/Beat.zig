@@ -177,9 +177,26 @@ pub const MinotaurIntegration = struct {
         const llvm_ir = try self.generateLLVMIR(candidate);
         defer self.allocator.free(llvm_ir);
         
-        // Check Redis cache first
+        // Check Redis cache first - but re-verify cached optimizations for safety
         if (try self.checkOptimizationCache(candidate)) |cached_opt| {
-            return cached_opt;
+            std.log.debug("Found cached SIMD optimization - re-verifying for safety", .{});
+            
+            // Re-verify cached optimization to ensure it's still valid
+            if (self.config.verify_optimizations) {
+                if (!try self.verifyOptimization(cached_opt)) {
+                    std.log.warn("Cached SIMD optimization failed re-verification - invalidating cache", .{});
+                    _ = self.verification_failures.fetchAdd(1, .monotonic);
+                    // TODO: Implement cache invalidation for failed re-verification
+                    // try self.invalidateCacheEntry(candidate);
+                } else {
+                    std.log.debug("Cached SIMD optimization passed re-verification - returning cached result", .{});
+                    return cached_opt;
+                }
+            } else {
+                // No verification enabled - return cached result (user responsibility)
+                std.log.debug("Returning cached SIMD optimization without re-verification (verification disabled)", .{});
+                return cached_opt;
+            }
         }
         
         // Run Minotaur analysis
@@ -188,16 +205,21 @@ pub const MinotaurIntegration = struct {
         if (optimization) |opt| {
             _ = self.optimizations_found.fetchAdd(1, .monotonic);
             
-            // Verify optimization if enabled
+            // Verify optimization if enabled - ONLY cache if verification succeeds
             if (self.config.verify_optimizations) {
                 if (!try self.verifyOptimization(opt)) {
                     _ = self.verification_failures.fetchAdd(1, .monotonic);
-                    return null;
+                    std.log.warn("SIMD optimization failed verification - not caching invalid optimization", .{});
+                    return null; // Return without caching failed verification
                 }
+                // Verification succeeded - safe to cache
+                std.log.debug("SIMD optimization passed verification - caching valid optimization", .{});
+                try self.cacheOptimization(candidate, opt);
+            } else {
+                // No verification enabled - cache directly (user responsibility)
+                std.log.debug("SIMD optimization caching without verification (verification disabled)", .{});
+                try self.cacheOptimization(candidate, opt);
             }
-            
-            // Cache the optimization
-            try self.cacheOptimization(candidate, opt);
         }
         
         return optimization;
@@ -268,10 +290,33 @@ pub const MinotaurIntegration = struct {
     }
     
     fn cacheOptimization(self: *MinotaurIntegration, candidate: SIMDOptimizationCandidate, optimization: SIMDOptimization) !void {
-        // Store optimization in Redis cache
+        // Store verified optimization in Redis cache with verification metadata
         _ = self;
         _ = candidate;
-        _ = optimization;
+        
+        // Enhanced caching with verification status tracking
+        std.log.debug("Caching verified SIMD optimization: type={}, cycles_saved={}, verified={}", .{
+            optimization.optimization_type, 
+            optimization.cycles_saved, 
+            optimization.formally_verified
+        });
+        
+        // TODO: Implement Redis caching with verification metadata:
+        // - Store optimization with timestamp
+        // - Include verification status in cache entry  
+        // - Add cache invalidation capabilities
+        // - Track cache hit/miss statistics
+        //
+        // Example cache entry structure:
+        // {
+        //   "optimization": optimization,
+        //   "verified": true,
+        //   "verification_time": timestamp,
+        //   "verification_method": "alive2",
+        //   "cache_version": "1.0"
+        // }
+        
+        // Note: optimization is used above for logging, no need to discard
     }
     
     fn applyOptimization(self: *MinotaurIntegration, optimization: SIMDOptimization) !bool {

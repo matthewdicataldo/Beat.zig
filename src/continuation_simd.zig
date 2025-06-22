@@ -75,14 +75,25 @@ pub const ContinuationClassifier = struct {
             self.simd_features
         );
         
-        // Cache result for future lookups
-        if (cont.fingerprint_hash) |hash| {
-            try self.classification_cache.put(hash, continuation_class);
+        // Cache result for future lookups - only cache valid classifications
+        if (self.isValidClassification(continuation_class)) {
+            if (cont.fingerprint_hash) |hash| {
+                std.log.debug("Caching valid SIMD classification: suitability={d:.2}, vectorization_potential={d:.2}", .{
+                    continuation_class.simd_suitability_score, 
+                    continuation_class.vectorization_potential
+                });
+                try self.classification_cache.put(hash, continuation_class);
+            } else {
+                // Generate fingerprint for caching
+                const hash = self.generateContinuationFingerprint(cont);
+                cont.fingerprint_hash = hash;
+                std.log.debug("Caching valid SIMD classification with generated fingerprint: suitability={d:.2}", .{
+                    continuation_class.simd_suitability_score
+                });
+                try self.classification_cache.put(hash, continuation_class);
+            }
         } else {
-            // Generate fingerprint for caching
-            const hash = self.generateContinuationFingerprint(cont);
-            cont.fingerprint_hash = hash;
-            try self.classification_cache.put(hash, continuation_class);
+            std.log.warn("SIMD classification validation failed - not caching invalid classification", .{});
         }
         
         // Track SIMD potential
@@ -151,6 +162,58 @@ pub const ContinuationClassifier = struct {
             .simd_hit_rate = simd_hit_rate,
             .batch_formation_stats = self.batch_former.getFormationStats(),
         };
+    }
+    
+    /// Validate SIMD classification before caching to prevent invalid optimizations
+    pub fn isValidClassification(self: *Self, classification: ContinuationSIMDClass) bool {
+        _ = self;
+        
+        // Comprehensive validation of classification results
+        
+        // 1. Suitability score validation
+        if (classification.simd_suitability_score < 0.0 or classification.simd_suitability_score > 1.0) {
+            std.log.warn("Invalid SIMD suitability score: {d:.3} (must be 0.0-1.0)", .{classification.simd_suitability_score});
+            return false;
+        }
+        
+        // 2. Overhead factor validation
+        if (classification.continuation_overhead_factor < 0.5 or classification.continuation_overhead_factor > 5.0) {
+            std.log.warn("Invalid continuation overhead factor: {d:.3} (must be 0.5-5.0)", .{classification.continuation_overhead_factor});
+            return false;
+        }
+        
+        // 3. Vectorization potential validation
+        if (classification.vectorization_potential < 0.0 or classification.vectorization_potential > 10.0) {
+            std.log.warn("Invalid vectorization potential: {d:.3} (must be 0.0-10.0)", .{classification.vectorization_potential});
+            return false;
+        }
+        
+        // 4. Task class validation (basic enum check)
+        // Note: Task class validation is handled by the type system
+        
+        // 5. Logical consistency checks
+        if (classification.simd_suitability_score > 0.8 and classification.vectorization_potential < 1.1) {
+            std.log.warn("Inconsistent classification: high suitability ({d:.2}) but low vectorization potential ({d:.2})", .{
+                classification.simd_suitability_score, classification.vectorization_potential
+            });
+            return false;
+        }
+        
+        // 6. NUMA node validation
+        if (classification.preferred_numa_node) |numa_node| {
+            if (numa_node > 64) { // Reasonable upper bound for NUMA nodes
+                std.log.warn("Invalid preferred NUMA node: {} (must be < 64)", .{numa_node});
+                return false;
+            }
+        }
+        
+        std.log.debug("SIMD classification validation passed: suitability={d:.2}, potential={d:.2}, overhead={d:.2}", .{
+            classification.simd_suitability_score,
+            classification.vectorization_potential,
+            classification.continuation_overhead_factor
+        });
+        
+        return true;
     }
     
     /// Generate fingerprint for continuation caching
