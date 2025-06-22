@@ -144,14 +144,14 @@ pub const UnifiedTripleOptimizationEngine = struct {
         var orchestrator_config = config.orchestrator_config;
         orchestrator_config.default_conflict_resolution = config.optimization_strategy.getConflictResolutionStrategy();
         
-        var orchestrator = try optimization_orchestrator.OptimizationOrchestrator.init(
+        const orchestrator = try optimization_orchestrator.OptimizationOrchestrator.init(
             allocator,
             orchestrator_config,
             &registry
         );
         
         // Initialize performance feedback system
-        var performance_feedback = PerformanceFeedbackSystem.init(allocator);
+        const performance_feedback = PerformanceFeedbackSystem.init(allocator);
         
         var engine = Self{
             .allocator = allocator,

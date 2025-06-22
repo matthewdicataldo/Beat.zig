@@ -303,7 +303,7 @@ pub const OptimizationOrchestrator = struct {
         }
         
         const end_time = std.time.nanoTimestamp();
-        results.total_execution_time_ms = @intCast((end_time - start_time) / 1_000_000);
+        results.total_execution_time_ms = @intCast(@divTrunc(end_time - start_time, 1_000_000));
         
         // Update success metrics
         if (results.executed_optimizations.count() > 0) {
@@ -368,7 +368,7 @@ pub const OptimizationOrchestrator = struct {
             try steps.append(OptimizationPlan.OptimizationStep{
                 .optimization_type = .souper,
                 .priority = 100,
-                .dependencies = &[_]optimization_registry.OptimizationType{},
+                .dependencies = try self.allocator.alloc(optimization_registry.OptimizationType, 0),
                 .estimated_speedup = 1.5,
                 .estimated_time_ms = 5000,
                 .fallback_available = true,
@@ -380,7 +380,7 @@ pub const OptimizationOrchestrator = struct {
             const souper_dep = if (region.isSuitableFor(.souper)) 
                 try self.allocator.dupe(optimization_registry.OptimizationType, &[_]optimization_registry.OptimizationType{.souper})
             else 
-                &[_]optimization_registry.OptimizationType{};
+                try self.allocator.alloc(optimization_registry.OptimizationType, 0);
             
             try steps.append(OptimizationPlan.OptimizationStep{
                 .optimization_type = .ispc,
@@ -655,11 +655,16 @@ pub fn deinitGlobalOrchestrator() void {
 test "OptimizationPlan basic functionality" {
     const allocator = std.testing.allocator;
     
+    const empty_deps = try allocator.alloc(optimization_registry.OptimizationType, 0);
+    defer allocator.free(empty_deps);
+    const souper_deps = try allocator.dupe(optimization_registry.OptimizationType, &[_]optimization_registry.OptimizationType{.souper});
+    defer allocator.free(souper_deps);
+    
     const steps = [_]OptimizationPlan.OptimizationStep{
         .{
             .optimization_type = .souper,
             .priority = 100,
-            .dependencies = &[_]optimization_registry.OptimizationType{},
+            .dependencies = empty_deps,
             .estimated_speedup = 1.5,
             .estimated_time_ms = 5000,
             .fallback_available = true,
@@ -667,7 +672,7 @@ test "OptimizationPlan basic functionality" {
         .{
             .optimization_type = .ispc,
             .priority = 90,
-            .dependencies = &[_]optimization_registry.OptimizationType{.souper},
+            .dependencies = souper_deps,
             .estimated_speedup = 6.0,
             .estimated_time_ms = 10000,
             .fallback_available = true,

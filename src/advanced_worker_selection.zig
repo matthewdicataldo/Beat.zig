@@ -1033,3 +1033,22 @@ test "lock-free selection history bounds checking" {
     try testing.expect(history.getWorkerSelections(0) == 1);
     try testing.expect(history.getWorkerSelections(3) == 1);
 }
+
+// ============================================================================
+// Global Management Functions for RuntimeContext Integration
+// ============================================================================
+
+/// Initialize global worker selection systems (placeholder for RuntimeContext)
+pub fn initializeGlobalSelection(allocator: std.mem.Allocator) void {
+    _ = allocator;
+    // Global worker selection initialization would go here
+    // Currently, AdvancedWorkerSelector is created per ThreadPool instance
+    std.log.debug("AdvancedWorkerSelection: Global selection systems initialized", .{});
+}
+
+/// Deinitialize global worker selection systems (placeholder for RuntimeContext)
+pub fn deinitializeGlobalSelection() void {
+    // Global worker selection cleanup would go here
+    // Currently, AdvancedWorkerSelector is cleaned up per ThreadPool instance
+    std.log.debug("AdvancedWorkerSelection: Global selection systems deinitialized", .{});
+}
