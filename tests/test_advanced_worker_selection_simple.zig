@@ -52,7 +52,8 @@ test "advanced worker selection - basic functionality" {
     // Test 3: Selector initialization
     std.debug.print("3. Testing selector initialization...\n", .{});
     
-    var selector = beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, balanced_criteria);
+    var selector = try beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, balanced_criteria, 4);
+    defer selector.deinit();
     
     try std.testing.expect(selector.enable_prediction == true);
     try std.testing.expect(selector.enable_exploration == true);
@@ -82,7 +83,8 @@ test "advanced worker selection - selection algorithm" {
     
     // Create selector
     const criteria = beat.advanced_worker_selection.SelectionCriteria.balanced();
-    var selector = beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, criteria);
+    var selector = try beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, criteria, 4);
+    defer selector.deinit();
     
     // Create test task
     const TestData = struct { value: i32 };

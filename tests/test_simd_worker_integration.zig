@@ -39,7 +39,8 @@ test "SIMD-aware worker selection integration" {
     };
     criteria.normalize();
     
-    var selector = beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, criteria);
+    var selector = try beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, criteria, 4);
+    defer selector.deinit();
     selector.setComponents(&fingerprint_registry, null, &decision_framework, &simd_registry);
     
     std.debug.print("   Created SIMD-aware worker selector with 30% SIMD weight\n", .{});
@@ -218,12 +219,14 @@ test "SIMD worker selection with different criteria profiles" {
     };
     simd_criteria.normalize();
     
-    var simd_selector = beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, simd_criteria);
+    var simd_selector = try beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, simd_criteria, 4);
+    defer simd_selector.deinit();
     simd_selector.setComponents(&fingerprint_registry, null, &decision_framework, &simd_registry);
     
     // Balanced criteria (normal SIMD weight)
     const balanced_criteria = beat.advanced_worker_selection.SelectionCriteria.balanced();
-    var balanced_selector = beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, balanced_criteria);
+    var balanced_selector = try beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, balanced_criteria, 4);
+    defer balanced_selector.deinit();
     balanced_selector.setComponents(&fingerprint_registry, null, &decision_framework, &simd_registry);
     
     // Create test task and workers

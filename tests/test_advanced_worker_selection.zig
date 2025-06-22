@@ -140,7 +140,8 @@ test "advanced worker selector initialization and configuration" {
     std.debug.print("1. Testing selector initialization...\n", .{});
     
     const criteria = beat.advanced_worker_selection.SelectionCriteria.balanced();
-    var selector = beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, criteria);
+    var selector = try beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, criteria, 4);
+    defer selector.deinit();
     
     std.debug.print("   Initialized advanced worker selector:\n", .{});
     std.debug.print("     Prediction enabled: {}\n", .{selector.enable_prediction});
@@ -186,7 +187,8 @@ test "worker selection with multi-criteria optimization" {
     
     // Create selector with balanced criteria
     const criteria = beat.advanced_worker_selection.SelectionCriteria.balanced();
-    var selector = beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, criteria);
+    var selector = try beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, criteria, 4);
+    defer selector.deinit();
     
     // Create test task
     const TestData = struct { value: i32 };
@@ -261,7 +263,8 @@ test "selection history and learning adaptation" {
     std.debug.print("1. Testing selection history tracking...\n", .{});
     
     const criteria = beat.advanced_worker_selection.SelectionCriteria.balanced();
-    var selector = beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, criteria);
+    var selector = try beat.advanced_worker_selection.AdvancedWorkerSelector.init(allocator, criteria, 4);
+    defer selector.deinit();
     
     // Create simple test workers
     const test_workers = [_]beat.intelligent_decision.WorkerInfo{

@@ -749,7 +749,7 @@ pub const ThreadPool = struct {
                 advanced_worker_selection.SelectionCriteria.balanced();
             
             self.advanced_selector = try allocator.create(advanced_worker_selection.AdvancedWorkerSelector);
-            self.advanced_selector.?.* = advanced_worker_selection.AdvancedWorkerSelector.init(allocator, selection_criteria);
+            self.advanced_selector.?.* = try advanced_worker_selection.AdvancedWorkerSelector.init(allocator, selection_criteria, actual_config.num_workers.?);
             
             // Connect prediction and analysis components if available
             self.advanced_selector.?.setComponents(
@@ -903,6 +903,7 @@ pub const ThreadPool = struct {
         }
         
         if (self.advanced_selector) |selector| {
+            selector.deinit();
             self.allocator.destroy(selector);
         }
         

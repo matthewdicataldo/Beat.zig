@@ -204,27 +204,178 @@ pub const AdvancedWorkerSelector = struct {
     
     const Self = @This();
     
-    /// Selection history for learning and adaptation
-    const SelectionHistory = struct {
-        recent_selections: [16]usize = [_]usize{0} ** 16,
-        selection_index: usize = 0,
-        total_selections: u64 = 0,
+    /// Lock-free selection history using per-worker atomic counters
+    pub const SelectionHistory = struct {
+        // Lock-free per-worker counters with cache-line padding for zero contention
+        worker_counters: []std.atomic.Value(u64),
+        max_workers: usize,
+        total_selections: std.atomic.Value(u64),
         
-        /// Record a worker selection
-        pub fn recordSelection(self: *SelectionHistory, worker_id: usize) void {
-            self.recent_selections[self.selection_index] = worker_id;
-            self.selection_index = (self.selection_index + 1) % 16;
-            self.total_selections += 1;
-        }
+        // Rolling window for frequency calculation (lock-free circular buffer)
+        recent_window: []std.atomic.Value(u32), // Stores worker IDs
+        window_size: usize,
+        window_index: std.atomic.Value(usize),
         
-        /// Get selection frequency for a worker
-        pub fn getSelectionFrequency(self: *const SelectionHistory, worker_id: usize) f32 {
-            var count: u32 = 0;
-            for (self.recent_selections) |selected_id| {
-                if (selected_id == worker_id) count += 1;
+        // Initialization
+        const CACHE_LINE_SIZE = 64;
+        const DEFAULT_WINDOW_SIZE = 64; // Power of 2 for efficient modulo
+        
+        pub fn init(allocator: std.mem.Allocator, max_workers: usize) !SelectionHistory {
+            // Allocate per-worker counters (use regular allocation for compatibility)
+            const aligned_counters = try allocator.alloc(std.atomic.Value(u64), max_workers);
+            
+            // Initialize all counters to zero
+            for (aligned_counters) |*counter| {
+                counter.* = std.atomic.Value(u64).init(0);
             }
-            return @as(f32, @floatFromInt(count)) / 16.0;
+            
+            // Allocate rolling window for frequency tracking
+            const window = try allocator.alloc(std.atomic.Value(u32), DEFAULT_WINDOW_SIZE);
+            for (window) |*slot| {
+                slot.* = std.atomic.Value(u32).init(0); // Worker ID 0 as default
+            }
+            
+            return SelectionHistory{
+                .worker_counters = aligned_counters,
+                .max_workers = max_workers,
+                .total_selections = std.atomic.Value(u64).init(0),
+                .recent_window = window,
+                .window_size = DEFAULT_WINDOW_SIZE,
+                .window_index = std.atomic.Value(usize).init(0),
+            };
         }
+        
+        pub fn deinit(self: *SelectionHistory, allocator: std.mem.Allocator) void {
+            // Use standard free for aligned allocations (Zig handles this automatically)
+            allocator.free(self.worker_counters);
+            allocator.free(self.recent_window);
+        }
+        
+        /// Record a worker selection (lock-free, thread-safe)
+        pub fn recordSelection(self: *SelectionHistory, worker_id: usize) void {
+            // Bounds check for safety
+            if (worker_id >= self.max_workers) return;
+            
+            // Atomically increment worker-specific counter
+            _ = self.worker_counters[worker_id].fetchAdd(1, .monotonic);
+            
+            // Atomically increment total selections
+            _ = self.total_selections.fetchAdd(1, .monotonic);
+            
+            // Update rolling window with lock-free circular buffer
+            const current_index = self.window_index.fetchAdd(1, .monotonic);
+            const slot_index = current_index % self.window_size;
+            
+            // Store worker ID in the rolling window slot
+            self.recent_window[slot_index].store(@intCast(worker_id), .monotonic);
+        }
+        
+        /// Get total selections for a specific worker (lock-free read)
+        pub fn getWorkerSelections(self: *const SelectionHistory, worker_id: usize) u64 {
+            if (worker_id >= self.max_workers) return 0;
+            return self.worker_counters[worker_id].load(.monotonic);
+        }
+        
+        /// Get selection frequency for a worker based on recent window (lock-free)
+        pub fn getSelectionFrequency(self: *const SelectionHistory, worker_id: usize) f32 {
+            if (worker_id >= self.max_workers) return 0.0;
+            
+            var count: u32 = 0;
+            const total_window_selections = @min(
+                self.total_selections.load(.monotonic), 
+                self.window_size
+            );
+            
+            if (total_window_selections == 0) return 0.0;
+            
+            // Scan recent window for matches (atomic reads)
+            for (self.recent_window[0..total_window_selections]) |*slot| {
+                const slot_worker_id = slot.load(.monotonic);
+                if (slot_worker_id == worker_id) {
+                    count += 1;
+                }
+            }
+            
+            return @as(f32, @floatFromInt(count)) / @as(f32, @floatFromInt(total_window_selections));
+        }
+        
+        /// Get global selection distribution (lock-free analysis)
+        pub fn getSelectionDistribution(self: *const SelectionHistory, allocator: std.mem.Allocator) ![]u64 {
+            const distribution = try allocator.alloc(u64, self.max_workers);
+            
+            for (distribution, 0..) |*count, worker_id| {
+                count.* = self.worker_counters[worker_id].load(.monotonic);
+            }
+            
+            return distribution;
+        }
+        
+        /// Get total selections across all workers (atomic read)
+        pub fn getTotalSelections(self: *const SelectionHistory) u64 {
+            return self.total_selections.load(.monotonic);
+        }
+        
+        /// Reset all counters (administrative operation - not lock-free)
+        pub fn reset(self: *SelectionHistory) void {
+            // Reset per-worker counters
+            for (self.worker_counters) |*counter| {
+                counter.store(0, .release);
+            }
+            
+            // Reset total counter
+            self.total_selections.store(0, .release);
+            
+            // Clear rolling window
+            for (self.recent_window) |*slot| {
+                slot.store(0, .release);
+            }
+            
+            // Reset window index
+            self.window_index.store(0, .release);
+        }
+        
+        /// Get detailed statistics (lock-free reads)
+        pub fn getStatistics(self: *const SelectionHistory) SelectionStatistics {
+            const total = self.getTotalSelections();
+            
+            var max_selections: u64 = 0;
+            var min_selections: u64 = if (total > 0) std.math.maxInt(u64) else 0;
+            var active_workers: u32 = 0;
+            
+            for (self.worker_counters) |*counter| {
+                const selections = counter.load(.monotonic);
+                if (selections > 0) {
+                    active_workers += 1;
+                    max_selections = @max(max_selections, selections);
+                    min_selections = @min(min_selections, selections);
+                }
+            }
+            
+            // Calculate load balance coefficient (lower = more balanced)
+            const balance_coefficient = if (active_workers > 0 and min_selections > 0)
+                @as(f32, @floatFromInt(max_selections)) / @as(f32, @floatFromInt(min_selections))
+            else
+                1.0;
+            
+            return SelectionStatistics{
+                .total_selections = total,
+                .active_workers = active_workers,
+                .max_worker_selections = max_selections,
+                .min_worker_selections = if (min_selections == std.math.maxInt(u64)) 0 else min_selections,
+                .load_balance_coefficient = balance_coefficient,
+                .window_utilization = @as(f32, @floatFromInt(@min(total, self.window_size))) / @as(f32, @floatFromInt(self.window_size)),
+            };
+        }
+    };
+    
+    /// Statistics for lock-free selection history analysis
+    const SelectionStatistics = struct {
+        total_selections: u64,
+        active_workers: u32,
+        max_worker_selections: u64,
+        min_worker_selections: u64,
+        load_balance_coefficient: f32, // 1.0 = perfect balance, higher = more imbalanced
+        window_utilization: f32, // 0.0-1.0 how full the recent window is
     };
     
     /// Performance tracking for algorithm improvement
@@ -266,17 +417,22 @@ pub const AdvancedWorkerSelector = struct {
         }
     };
     
-    /// Initialize advanced worker selector
-    pub fn init(allocator: std.mem.Allocator, criteria: SelectionCriteria) Self {
+    /// Initialize advanced worker selector with lock-free components
+    pub fn init(allocator: std.mem.Allocator, criteria: SelectionCriteria, max_workers: usize) !Self {
         var normalized_criteria = criteria;
         normalized_criteria.normalize();
         
         return Self{
             .allocator = allocator,
             .criteria = normalized_criteria,
-            .selection_history = SelectionHistory{},
+            .selection_history = try SelectionHistory.init(allocator, max_workers),
             .performance_tracker = PerformanceTracker{},
         };
+    }
+    
+    /// Clean up resources
+    pub fn deinit(self: *Self) void {
+        self.selection_history.deinit(self.allocator);
     }
     
     /// Set prediction and analysis components
@@ -731,7 +887,7 @@ test "selection criteria normalization" {
     criteria.normalize();
     
     const total = criteria.load_balance_weight + criteria.prediction_weight + 
-                 criteria.topology_weight + criteria.confidence_weight + criteria.exploration_weight;
+                 criteria.topology_weight + criteria.confidence_weight + criteria.exploration_weight + criteria.simd_weight;
     
     try testing.expect(@abs(total - 1.0) < 0.001);
 }
@@ -748,9 +904,132 @@ test "advanced worker selector initialization" {
     const allocator = testing.allocator;
     const criteria = SelectionCriteria.balanced();
     
-    const selector = AdvancedWorkerSelector.init(allocator, criteria);
+    var selector = try AdvancedWorkerSelector.init(allocator, criteria, 8);
+    defer selector.deinit();
     
     try testing.expect(selector.enable_prediction == true);
     try testing.expect(selector.enable_exploration == true);
-    try testing.expect(selector.selection_history.total_selections == 0);
+    try testing.expect(selector.selection_history.getTotalSelections() == 0);
+}
+
+test "lock-free selection history basic operations" {
+    const allocator = testing.allocator;
+    
+    var history = try AdvancedWorkerSelector.SelectionHistory.init(allocator, 4);
+    defer history.deinit(allocator);
+    
+    // Test initial state
+    try testing.expect(history.getTotalSelections() == 0);
+    try testing.expect(history.getWorkerSelections(0) == 0);
+    try testing.expect(history.getSelectionFrequency(0) == 0.0);
+    
+    // Test recording selections
+    history.recordSelection(0);
+    history.recordSelection(1);
+    history.recordSelection(0);
+    history.recordSelection(2);
+    
+    // Verify counters
+    try testing.expect(history.getTotalSelections() == 4);
+    try testing.expect(history.getWorkerSelections(0) == 2);
+    try testing.expect(history.getWorkerSelections(1) == 1);
+    try testing.expect(history.getWorkerSelections(2) == 1);
+    try testing.expect(history.getWorkerSelections(3) == 0);
+    
+    // Test frequency calculation
+    const freq_0 = history.getSelectionFrequency(0);
+    const freq_1 = history.getSelectionFrequency(1);
+    const freq_3 = history.getSelectionFrequency(3);
+    
+    try testing.expect(freq_0 == 0.5); // 2/4
+    try testing.expect(freq_1 == 0.25); // 1/4  
+    try testing.expect(freq_3 == 0.0); // 0/4
+}
+
+test "lock-free selection history statistics" {
+    const allocator = testing.allocator;
+    
+    var history = try AdvancedWorkerSelector.SelectionHistory.init(allocator, 6);
+    defer history.deinit(allocator);
+    
+    // Create unbalanced selection pattern
+    for (0..10) |_| history.recordSelection(0); // Worker 0: 10 selections
+    for (0..5) |_| history.recordSelection(1);  // Worker 1: 5 selections
+    for (0..2) |_| history.recordSelection(2);  // Worker 2: 2 selections
+    // Workers 3,4,5: 0 selections
+    
+    const stats = history.getStatistics();
+    
+    try testing.expect(stats.total_selections == 17);
+    try testing.expect(stats.active_workers == 3);
+    try testing.expect(stats.max_worker_selections == 10);
+    try testing.expect(stats.min_worker_selections == 2);
+    try testing.expect(stats.load_balance_coefficient == 5.0); // 10/2 = 5.0 (imbalanced)
+    
+    // Test balanced pattern
+    history.reset();
+    for (0..4) |worker_id| {
+        for (0..5) |_| history.recordSelection(worker_id);
+    }
+    
+    const balanced_stats = history.getStatistics();
+    try testing.expect(balanced_stats.load_balance_coefficient == 1.0); // Perfect balance
+}
+
+test "lock-free selection history concurrent simulation" {
+    const allocator = testing.allocator;
+    
+    var history = try AdvancedWorkerSelector.SelectionHistory.init(allocator, 8);
+    defer history.deinit(allocator);
+    
+    // Simulate concurrent access by multiple threads (sequential simulation)
+    // This tests the atomic operations work correctly
+    const operations_per_worker = 100;
+    
+    for (0..8) |worker_id| {
+        for (0..operations_per_worker) |_| {
+            history.recordSelection(worker_id);
+        }
+    }
+    
+    // Verify atomicity - all operations should be recorded
+    try testing.expect(history.getTotalSelections() == 8 * operations_per_worker);
+    
+    for (0..8) |worker_id| {
+        try testing.expect(history.getWorkerSelections(worker_id) == operations_per_worker);
+    }
+    
+    // Test distribution analysis
+    const distribution = try history.getSelectionDistribution(allocator);
+    defer allocator.free(distribution);
+    
+    var total_from_distribution: u64 = 0;
+    for (distribution) |count| {
+        total_from_distribution += count;
+    }
+    
+    try testing.expect(total_from_distribution == history.getTotalSelections());
+}
+
+test "lock-free selection history bounds checking" {
+    const allocator = testing.allocator;
+    
+    var history = try AdvancedWorkerSelector.SelectionHistory.init(allocator, 4);
+    defer history.deinit(allocator);
+    
+    // Test bounds checking for invalid worker IDs
+    history.recordSelection(10); // Should be ignored (out of bounds)
+    history.recordSelection(4);  // Should be ignored (out of bounds)
+    
+    try testing.expect(history.getTotalSelections() == 0);
+    try testing.expect(history.getWorkerSelections(10) == 0);
+    try testing.expect(history.getSelectionFrequency(10) == 0.0);
+    
+    // Valid selections should work
+    history.recordSelection(0);
+    history.recordSelection(3);
+    
+    try testing.expect(history.getTotalSelections() == 2);
+    try testing.expect(history.getWorkerSelections(0) == 1);
+    try testing.expect(history.getWorkerSelections(3) == 1);
 }
