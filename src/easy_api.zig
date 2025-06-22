@@ -1,6 +1,6 @@
 const std = @import("std");
 const core = @import("core.zig");
-const build_opts = @import("build_opts_new.zig");
+const build_opts = @import("build_config_unified.zig");
 const enhanced_errors = @import("enhanced_errors.zig");
 
 // Easy API for Beat.zig - Progressive Feature Adoption

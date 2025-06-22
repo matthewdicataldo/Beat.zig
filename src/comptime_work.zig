@@ -1,6 +1,6 @@
 const std = @import("std");
 const core = @import("core.zig");
-const build_opts = @import("build_opts.zig");
+const build_opts = @import("build_config_unified.zig");
 
 // Comptime Work Distribution Patterns for Beat.zig
 // 

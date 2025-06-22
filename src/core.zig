@@ -11,8 +11,8 @@ pub const pcall = @import("pcall.zig");
 pub const coz = @import("coz.zig");
 pub const testing = @import("testing.zig");
 pub const ispc_cleanup = @import("ispc_cleanup_coordinator.zig");
-// Use smart build configuration that handles dependency scenarios
-pub const build_opts = @import("build_opts_new.zig");
+// Use unified build configuration that consolidates all build options
+pub const build_opts = @import("build_config_unified.zig");
 pub const comptime_work = @import("comptime_work.zig");
 pub const enhanced_errors = @import("enhanced_errors.zig");
 pub const fingerprint = @import("fingerprint.zig");

@@ -223,10 +223,10 @@ pub fn formatDependencyChainError(error_details: []const u8) []const u8 {
         \\
         \\┌─ Fix 1: Update to new Smart Configuration ──────────────────────────────┐
         \\│                                                                          │
-        \\│  Replace any direct imports with smart resolver:                        │
+        \\│  Replace any direct imports with unified configuration:                 │
         \\│                                                                          │
         \\│  OLD: const build_opts = @import("build_opts.zig");                     │
-        \\│  NEW: const build_opts = @import("build_opts_new.zig");                 │
+        \\│  NEW: const build_opts = @import("build_config_unified.zig");           │
         \\│                                                                          │
         \\│  The new resolver automatically handles dependency scenarios.           │
         \\│                                                                          │
@@ -436,8 +436,8 @@ pub fn printMigrationGuide() void {
         \\  2. Upgrade to: beat.createPerformancePool() 
         \\  3. Full features: beat.createAdvancedPool()
         \\
-        \\DEPENDENCY-SAFE CONFIGURATION:
-        \\  • Uses build_opts_new.zig with smart resolver
+        \\UNIFIED CONFIGURATION:
+        \\  • Uses build_config_unified.zig with smart strategy detection
         \\  • Automatic fallback when build_config unavailable
         \\  • Runtime hardware detection as backup
         \\
