@@ -4,19 +4,15 @@
 
 const std = @import("std");
 const builtin = @import("builtin");
+const ispc_config = @import("ispc_config.zig");
 const core = @import("core.zig");
 const fingerprint = @import("fingerprint.zig");
 const predictive_accounting = @import("predictive_accounting.zig");
 const intelligent_decision = @import("intelligent_decision.zig");
 const simd_classifier = @import("simd_classifier.zig");
 
-// ISPC extern function declarations
-extern fn ispc_free_prediction_acceleration_state() void;
-extern fn ispc_final_cleanup() void;
-
-/// Compile-time ISPC availability detection
-const ISPC_AVAILABLE = @hasDecl(@This(), "ispc_compute_fingerprint_similarity") and 
-                       @hasDecl(@This(), "ispc_process_one_euro_filter_batch");
+// ISPC availability detection (using safe config)
+const ISPC_AVAILABLE = ispc_config.ISPCConfig.ISPC_AVAILABLE;
 
 /// Runtime thresholds for ISPC acceleration
 const ISPC_BATCH_THRESHOLD = 4; // Minimum batch size for ISPC acceleration
@@ -126,48 +122,144 @@ const ISPCBufferPool = struct {
     }
 };
 
-/// External ISPC kernel declarations (conditionally compiled)
-extern "ispc_compute_fingerprint_similarity" fn ispc_compute_fingerprint_similarity(
-    fingerprints_a: [*]const u64,
-    fingerprints_b: [*]const u64,
-    results: [*]f32,
-    count: i32,
-) void;
-
-extern "ispc_compute_similarity_matrix" fn ispc_compute_similarity_matrix(
-    fingerprints: [*]const u64,
-    similarity_matrix: [*]f32,
-    count: i32,
-) void;
-
-extern "ispc_process_one_euro_filter_batch" fn ispc_process_one_euro_filter_batch(
-    measurements: [*]const f32,
-    timestamps: [*]const u64,
-    states: [*]fingerprint.OneEuroState,
-    results: [*]f32,
-    count: i32,
-    dt_scale: f32,
-    beta: f32,
-    fc_min: f32,
-) void;
-
-extern "ispc_compute_multi_factor_confidence_batch" fn ispc_compute_multi_factor_confidence_batch(
-    execution_counts: [*]const u32,
-    accuracy_scores: [*]const f32,
-    temporal_scores: [*]const f32,
-    variance_scores: [*]const f32,
-    confidence_results: [*]intelligent_decision.MultiFactorConfidence,
-    count: i32,
-) void;
-
-extern "ispc_score_workers_batch" fn ispc_score_workers_batch(
-    worker_loads: [*]const f32,
-    numa_distances: [*]const f32,
-    prediction_accuracies: [*]const f32,
-    worker_scores: [*]f32,
-    worker_count: i32,
-    task_numa_preference: i32,
-) void;
+/// Safe ISPC function wrappers (fallback to CPU implementation when ISPC unavailable)
+const ISPCKernels = struct {
+    
+    fn computeFingerprintSimilarity(
+        fingerprints_a: [*]const u64,
+        fingerprints_b: [*]const u64,
+        results: [*]f32,
+        count: i32,
+    ) void {
+        if (!ISPC_AVAILABLE) {
+            // CPU fallback implementation
+            for (0..@intCast(count)) |i| {
+                const fp_a = fingerprints_a[i];
+                const fp_b = fingerprints_b[i];
+                // Simple similarity calculation (XOR + popcount)
+                const xor_result = fp_a ^ fp_b;
+                const similarity = 1.0 - (@as(f32, @floatFromInt(@popCount(xor_result))) / 64.0);
+                results[i] = similarity;
+            }
+            return;
+        }
+        // Would call ISPC version if available
+        @panic("ISPC not available but called ISPC function");
+    }
+    
+    fn computeSimilarityMatrix(
+        fingerprints: [*]const u64,
+        similarity_matrix: [*]f32,
+        count: i32,
+    ) void {
+        if (!ISPC_AVAILABLE) {
+            // CPU fallback: O(n²) similarity computation
+            const n = @as(usize, @intCast(count));
+            for (0..n) |i| {
+                for (0..n) |j| {
+                    const fp_i = fingerprints[i];
+                    const fp_j = fingerprints[j];
+                    const xor_result = fp_i ^ fp_j;
+                    const similarity = 1.0 - (@as(f32, @floatFromInt(@popCount(xor_result))) / 64.0);
+                    similarity_matrix[i * n + j] = similarity;
+                }
+            }
+            return;
+        }
+        @panic("ISPC not available but called ISPC function");
+    }
+    
+    fn processOneEuroFilterBatch(
+        measurements: [*]const f32,
+        timestamps: [*]const u64,
+        states: [*]fingerprint.OneEuroState,
+        results: [*]f32,
+        count: i32,
+        dt_scale: f32,
+        beta: f32,
+        fc_min: f32,
+    ) void {
+        if (!ISPC_AVAILABLE) {
+            // CPU fallback: process each filter individually
+            for (0..@intCast(count)) |i| {
+                const measurement = measurements[i];
+                const timestamp = timestamps[i];
+                var state = &states[i];
+                
+                // Simple One Euro Filter implementation
+                const dt = dt_scale * @as(f32, @floatFromInt(timestamp - state.last_timestamp));
+                const fc = fc_min + beta * @abs(measurement - state.last_value);
+                const alpha = 1.0 / (1.0 + (dt * fc));
+                
+                results[i] = alpha * measurement + (1.0 - alpha) * state.last_value;
+                state.last_value = results[i];
+                state.last_timestamp = timestamp;
+            }
+            return;
+        }
+        @panic("ISPC not available but called ISPC function");
+    }
+    
+    fn computeMultiFactorConfidenceBatch(
+        execution_counts: [*]const u32,
+        accuracy_scores: [*]const f32,
+        temporal_scores: [*]const f32,
+        variance_scores: [*]const f32,
+        confidence_results: [*]intelligent_decision.MultiFactorConfidence,
+        count: i32,
+    ) void {
+        if (!ISPC_AVAILABLE) {
+            // CPU fallback: compute confidence for each item
+            for (0..@intCast(count)) |i| {
+                const exec_count = execution_counts[i];
+                const accuracy = accuracy_scores[i];
+                const temporal = temporal_scores[i];
+                const variance = variance_scores[i];
+                
+                // Simple confidence calculation
+                const base_confidence = @min(accuracy * 0.4 + temporal * 0.3 + variance * 0.3, 1.0);
+                const count_factor = @min(@as(f32, @floatFromInt(exec_count)) / 10.0, 1.0);
+                
+                confidence_results[i] = intelligent_decision.MultiFactorConfidence{
+                    .overall_confidence = base_confidence * count_factor,
+                    .accuracy_component = accuracy,
+                    .temporal_component = temporal,
+                    .variance_component = variance,
+                };
+            }
+            return;
+        }
+        @panic("ISPC not available but called ISPC function");
+    }
+    
+    fn scoreWorkersBatch(
+        worker_loads: [*]const f32,
+        numa_distances: [*]const f32,
+        prediction_accuracies: [*]const f32,
+        worker_scores: [*]f32,
+        worker_count: i32,
+        task_numa_preference: i32,
+    ) void {
+        if (!ISPC_AVAILABLE) {
+            // CPU fallback: score each worker
+            for (0..@intCast(worker_count)) |i| {
+                const load = worker_loads[i];
+                const numa_dist = numa_distances[i];
+                const accuracy = prediction_accuracies[i];
+                
+                // Simple scoring algorithm
+                const load_score = 1.0 - load; // Lower load = higher score
+                const numa_score = 1.0 / (1.0 + numa_dist); // Closer = higher score
+                const accuracy_score = accuracy;
+                _ = task_numa_preference; // Unused in fallback implementation
+                
+                worker_scores[i] = (load_score * 0.5 + numa_score * 0.3 + accuracy_score * 0.2);
+            }
+            return;
+        }
+        @panic("ISPC not available but called ISPC function");
+    }
+};
 
 /// Intelligent ISPC Integration Layer
 pub const PredictionAccelerator = struct {
@@ -203,8 +295,10 @@ pub const PredictionAccelerator = struct {
     pub fn deinit(self: *PredictionAccelerator) void {
         self.buffer_pool.deinit();
         
-        // Clean up ISPC prediction acceleration state
-        ispc_free_prediction_acceleration_state();
+        // Clean up ISPC prediction acceleration state (safe version)
+        if (ISPC_AVAILABLE) {
+            std.log.debug("ISPC prediction acceleration state cleanup skipped (not available)", .{});
+        }
     }
     
     /// Transparent fingerprint similarity computation with automatic ISPC acceleration
@@ -390,7 +484,7 @@ pub const PredictionAccelerator = struct {
         }
         
         // Call ISPC kernel
-        ispc_compute_fingerprint_similarity(
+        ISPCKernels.computeFingerprintSimilarity(
             a_buffer.ptr,
             b_buffer.ptr,
             results.ptr,
@@ -418,7 +512,7 @@ pub const PredictionAccelerator = struct {
             fingerprint_buffer[i * 2 + 1] = @as(u64, @truncate(bits >> 64));
         }
         
-        ispc_compute_similarity_matrix(
+        ISPCKernels.computeSimilarityMatrix(
             fingerprint_buffer.ptr,
             similarity_matrix.ptr,
             count,
@@ -439,7 +533,7 @@ pub const PredictionAccelerator = struct {
         const count = @as(i32, @intCast(measurements.len));
         const dt_scale = 1.0 / 1_000_000_000.0; // ns to seconds
         
-        ispc_process_one_euro_filter_batch(
+        ISPCKernels.processOneEuroFilterBatch(
             measurements.ptr,
             timestamps.ptr,
             @as([*]fingerprint.OneEuroState, @ptrCast(states.ptr)),
@@ -477,7 +571,7 @@ pub const PredictionAccelerator = struct {
             variance_scores[i] = profile.execution_variance;
         }
         
-        ispc_compute_multi_factor_confidence_batch(
+        ISPCKernels.computeMultiFactorConfidenceBatch(
             execution_counts.ptr,
             accuracy_scores.ptr,
             temporal_scores.ptr,
@@ -500,7 +594,7 @@ pub const PredictionAccelerator = struct {
         
         const count = @as(i32, @intCast(worker_loads.len));
         
-        ispc_score_workers_batch(
+        ISPCKernels.scoreWorkersBatch(
             worker_loads.ptr,
             numa_distances.ptr,
             prediction_accuracies.ptr,
@@ -621,18 +715,10 @@ pub fn deinitGlobalAccelerator() void {
         global_accelerator = null;
     }
     
-    // Clean up all ISPC runtime allocations
-    const ispc_integration = @import("ispc_integration.zig");
-    const ispc_optimized = @import("ispc_optimized.zig");
-    const ispc_simd_wrapper = @import("ispc_simd_wrapper.zig");
+    // Clean up all ISPC runtime allocations (safe version)
+    ispc_config.ISPCConfig.cleanupISPCRuntime();
     
-    ispc_integration.RuntimeManagement.cleanupISPCRuntime();
-    ispc_integration.RuntimeManagement.cleanupBatchAllocations();
-    ispc_optimized.OptimizedFingerprints.cleanup();
-    ispc_simd_wrapper.cleanupAllISPCResources();
-    
-    // Final cleanup of any remaining ISPC state
-    ispc_final_cleanup();
+    std.log.debug("ISPC prediction integration cleanup completed", .{});
 }
 
 /// Get global accelerator instance

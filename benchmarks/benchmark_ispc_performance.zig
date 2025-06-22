@@ -43,7 +43,7 @@ fn formatThroughput(ops_per_sec: f64) void {
 
 // Benchmark fingerprint similarity computation
 fn benchmarkFingerprintSimilarity(allocator: std.mem.Allocator, size: usize, iterations: u32) !BenchmarkResult {
-    std.debug.print("\n=== Fingerprint Similarity Benchmark ===\n");
+    std.debug.print("\n=== Fingerprint Similarity Benchmark ===\n", .{});
     std.debug.print("Dataset size: {} fingerprint pairs\n", .{size});
     std.debug.print("Iterations: {}\n", .{iterations});
 

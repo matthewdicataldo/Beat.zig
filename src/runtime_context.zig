@@ -11,6 +11,8 @@ const memory_pressure = @import("memory_pressure.zig");
 const ispc_prediction_integration = @import("ispc_prediction_integration.zig");
 const advanced_worker_selection = @import("advanced_worker_selection.zig");
 const simd_classifier = @import("simd_classifier.zig");
+const opentelemetry = @import("opentelemetry.zig");
+const error_reporter = @import("error_reporter.zig");
 
 // ============================================================================
 // Runtime Context - Deterministic Resource Lifecycle Management
@@ -54,6 +56,9 @@ pub const RuntimeContextConfig = struct {
     /// Enable SIMD classification system
     enable_simd_classification: bool = true,
     
+    /// Enable OpenTelemetry observability
+    enable_opentelemetry: bool = true,
+    
     /// Enable background profiling threads
     enable_background_profiling: bool = false, // Disabled by default for stability
     
@@ -65,6 +70,9 @@ pub const RuntimeContextConfig = struct {
     
     /// Optimization system configuration
     optimization_config: unified_triple_optimization.UnifiedTripleOptimizationConfig = .{},
+    
+    /// OpenTelemetry configuration
+    opentelemetry_config: opentelemetry.OpenTelemetryConfig = .{},
 };
 
 /// Centralized runtime context managing all global resources
@@ -89,6 +97,9 @@ pub const RuntimeContext = struct {
     optimization_orchestrator: ?*optimization_orchestrator.OptimizationOrchestrator = null,
     optimization_engine: ?*unified_triple_optimization.UnifiedTripleOptimizationEngine = null,
     
+    // Observability system resources
+    opentelemetry_tracer: ?*opentelemetry.Tracer = null,
+    
     // Background threads (managed explicitly)
     background_threads: std.ArrayList(std.Thread),
     
@@ -98,6 +109,7 @@ pub const RuntimeContext = struct {
     memory_pressure_initialized: bool = false,
     optimization_initialized: bool = false,
     ispc_initialized: bool = false,
+    opentelemetry_initialized: bool = false,
     
     /// Initialize the runtime context with all global resources
     pub fn init(allocator: std.mem.Allocator, config: RuntimeContextConfig) !*Self {
@@ -131,6 +143,9 @@ pub const RuntimeContext = struct {
         std.log.info("RuntimeContext: Beginning coordinated shutdown of all global resources", .{});
         
         // Shutdown in reverse dependency order to avoid use-after-free
+        self.shutdownOpenTelemetry();
+        self.shutdownSIMDClassification();
+        self.shutdownAdvancedWorkerSelection();
         self.shutdownISPCResources();
         self.shutdownOptimizationSystems();
         self.shutdownMemoryPressureMonitoring();
@@ -188,6 +203,12 @@ pub const RuntimeContext = struct {
         return self.optimization_orchestrator;
     }
     
+    /// Get the OpenTelemetry tracer (thread-safe)
+    pub fn getOpenTelemetryTracer(self: *Self) ?*opentelemetry.Tracer {
+        if (!self.isInitialized() or self.isShuttingDown()) return null;
+        return self.opentelemetry_tracer;
+    }
+    
     /// Get comprehensive runtime statistics
     pub fn getStatistics(self: *Self) RuntimeStatistics {
         var stats = RuntimeStatistics{
@@ -198,6 +219,7 @@ pub const RuntimeContext = struct {
             .memory_pressure_initialized = self.memory_pressure_initialized,
             .optimization_initialized = self.optimization_initialized,
             .ispc_initialized = self.ispc_initialized,
+            .opentelemetry_initialized = self.opentelemetry_initialized,
             .background_threads_count = @intCast(self.background_threads.items.len),
         };
         
@@ -254,6 +276,11 @@ pub const RuntimeContext = struct {
         // 7. SIMD classification (depends on task stats and ISPC)
         if (self.config.enable_simd_classification) {
             try self.initializeSIMDClassification();
+        }
+        
+        // 8. OpenTelemetry observability (can be initialized independently)
+        if (self.config.enable_opentelemetry) {
+            try self.initializeOpenTelemetry();
         }
     }
     
@@ -346,7 +373,56 @@ pub const RuntimeContext = struct {
         std.log.info("RuntimeContext: SIMD classification initialized", .{});
     }
     
+    fn initializeOpenTelemetry(self: *Self) !void {
+        std.log.debug("RuntimeContext: Initializing OpenTelemetry observability", .{});
+        
+        // Initialize resource attributes for the config
+        self.config.opentelemetry_config.initResourceAttributes(self.allocator);
+        
+        // Create OpenTelemetry tracer with configuration
+        self.opentelemetry_tracer = try self.allocator.create(opentelemetry.Tracer);
+        self.opentelemetry_tracer.?.* = try opentelemetry.Tracer.init(self.allocator, self.config.opentelemetry_config);
+        
+        // Initialize global tracer for system-wide access
+        _ = try opentelemetry.initGlobalTracer(self.allocator, self.config.opentelemetry_config);
+        
+        // Integrate with ErrorReporter if available
+        if (error_reporter.getGlobalErrorReporter()) |global_error_reporter| {
+            global_error_reporter.setTelemetryHook(opentelemetry.errorReporterTelemetryHook);
+            std.log.debug("RuntimeContext: OpenTelemetry integrated with ErrorReporter", .{});
+        } else |_| {
+            std.log.debug("RuntimeContext: ErrorReporter not available for OpenTelemetry integration", .{});
+        }
+        
+        self.opentelemetry_initialized = true;
+        std.log.info("RuntimeContext: OpenTelemetry observability initialized", .{});
+    }
+    
     // Private shutdown methods (in reverse dependency order)
+    
+    fn shutdownOpenTelemetry(self: *Self) void {
+        if (!self.opentelemetry_initialized) return;
+        
+        std.log.debug("RuntimeContext: Shutting down OpenTelemetry observability", .{});
+        
+        if (self.opentelemetry_tracer) |tracer| {
+            // Force export any pending telemetry data
+            tracer.forceExport() catch |err| {
+                std.log.warn("RuntimeContext: Failed to export pending telemetry data: {}", .{err});
+            };
+            
+            // Clean up the tracer
+            tracer.deinit();
+            self.allocator.destroy(tracer);
+            self.opentelemetry_tracer = null;
+        }
+        
+        // Shutdown global tracer
+        opentelemetry.deinitGlobalTracer(self.allocator);
+        
+        self.opentelemetry_initialized = false;
+        std.log.info("RuntimeContext: OpenTelemetry observability shut down", .{});
+    }
     
     fn shutdownSIMDClassification(self: *Self) void {
         if (!self.config.enable_simd_classification) return;
@@ -459,6 +535,7 @@ pub const RuntimeStatistics = struct {
     memory_pressure_initialized: bool,
     optimization_initialized: bool,
     ispc_initialized: bool,
+    opentelemetry_initialized: bool,
     
     // Resource counts
     background_threads_count: u32,
@@ -484,6 +561,7 @@ pub const RuntimeStatistics = struct {
             \\  • Memory pressure monitoring: {}
             \\  • Optimization systems: {}
             \\  • ISPC acceleration: {}
+            \\  • OpenTelemetry observability: {}
             \\
             \\Current State:
             \\  • Memory pressure level: {s}
@@ -499,6 +577,7 @@ pub const RuntimeStatistics = struct {
             self.memory_pressure_initialized,
             self.optimization_initialized,
             self.ispc_initialized,
+            self.opentelemetry_initialized,
             @tagName(self.memory_pressure_level),
             self.task_stats != null,
             self.optimization_stats != null,
@@ -575,6 +654,7 @@ pub fn createDevelopmentConfig() RuntimeContextConfig {
         .enable_advanced_worker_selection = true,   // Keep for performance testing
         .enable_task_execution_stats = true,        // Keep for performance analysis
         .enable_simd_classification = false,        // Disable for simpler debugging
+        .enable_opentelemetry = true,               // Enable for debugging insights
         .enable_background_profiling = false,       // Always disabled in development
     };
 }
@@ -589,7 +669,8 @@ pub fn createProductionConfig() RuntimeContextConfig {
         .enable_advanced_worker_selection = true,
         .enable_task_execution_stats = true,
         .enable_simd_classification = true,
-        .enable_background_profiling = false, // Disabled for stability
+        .enable_opentelemetry = true,                // Enable full observability
+        .enable_background_profiling = false,       // Disabled for stability
         .memory_pressure_config = .{},
         .ispc_config = .{
             .enable_ispc = true,
@@ -613,6 +694,7 @@ pub fn createTestingConfig() RuntimeContextConfig {
         .enable_advanced_worker_selection = false,
         .enable_task_execution_stats = false,
         .enable_simd_classification = false,
+        .enable_opentelemetry = false,              // Disable for cleaner testing
         .enable_background_profiling = false,
     };
 }
@@ -662,12 +744,15 @@ test "RuntimeContext configuration factories" {
     const dev_config = createDevelopmentConfig();
     try std.testing.expect(!dev_config.enable_ispc_acceleration);
     try std.testing.expect(!dev_config.enable_optimization_systems);
+    try std.testing.expect(dev_config.enable_opentelemetry);
     
     const prod_config = createProductionConfig();
     try std.testing.expect(prod_config.enable_ispc_acceleration);
     try std.testing.expect(prod_config.enable_optimization_systems);
+    try std.testing.expect(prod_config.enable_opentelemetry);
     
     const test_config = createTestingConfig();
     try std.testing.expect(!test_config.enable_numa_awareness);
     try std.testing.expect(!test_config.enable_advanced_worker_selection);
+    try std.testing.expect(!test_config.enable_opentelemetry);
 }
