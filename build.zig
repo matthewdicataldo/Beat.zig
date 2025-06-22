@@ -1226,6 +1226,74 @@ pub fn build(b: *std.Build) void {
     const ispc_migration_test_step = b.step("test-ispc-migration", "Test Zig SIMD → ISPC migration and API compatibility");
     ispc_migration_test_step.dependOn(&run_ispc_migration_test.step);
     
+    // ========================================================================
+    // Comprehensive Fuzz Testing for Allocator Errors and Hardware Absence
+    // Targets 65% branch coverage through systematic negative testing
+    // ========================================================================
+    
+    // Fuzzing allocator test for allocator error injection
+    const fuzzing_allocator_test = b.addTest(.{
+        .name = "test_fuzzing_allocator",
+        .root_source_file = b.path("src/fuzzing/fuzzing_allocator.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    build_config.addBuildOptions(b, fuzzing_allocator_test, auto_config);
+    
+    const run_fuzzing_allocator_test = b.addRunArtifact(fuzzing_allocator_test);
+    const fuzzing_allocator_test_step = b.step("test-fuzzing-allocator", "Test comprehensive allocator error injection for negative testing");
+    fuzzing_allocator_test_step.dependOn(&run_fuzzing_allocator_test.step);
+    
+    // Hardware absence simulator test for hardware failure simulation
+    const hardware_absence_test = b.addTest(.{
+        .name = "test_hardware_absence",
+        .root_source_file = b.path("src/fuzzing/hardware_absence_simulator.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    build_config.addBuildOptions(b, hardware_absence_test, auto_config);
+    
+    const run_hardware_absence_test = b.addRunArtifact(hardware_absence_test);
+    const hardware_absence_test_step = b.step("test-hardware-absence", "Test hardware absence simulation (CPU, SIMD, NUMA, monitoring failures)");
+    hardware_absence_test_step.dependOn(&run_hardware_absence_test.step);
+    
+    // State fuzzing test for component interaction and race condition testing
+    const state_fuzzing_test = b.addTest(.{
+        .name = "test_state_fuzzing",
+        .root_source_file = b.path("src/fuzzing/state_fuzzer.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    build_config.addBuildOptions(b, state_fuzzing_test, auto_config);
+    
+    const run_state_fuzzing_test = b.addRunArtifact(state_fuzzing_test);
+    const state_fuzzing_test_step = b.step("test-state-fuzzing", "Test state fuzzing for component interactions and race condition detection");
+    state_fuzzing_test_step.dependOn(&run_state_fuzzing_test.step);
+    
+    // Comprehensive fuzzing integration test
+    const comprehensive_fuzzing_test = b.addTest(.{
+        .name = "test_comprehensive_fuzzing",
+        .root_source_file = b.path("src/fuzzing.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    build_config.addBuildOptions(b, comprehensive_fuzzing_test, auto_config);
+    
+    const run_comprehensive_fuzzing_test = b.addRunArtifact(comprehensive_fuzzing_test);
+    const comprehensive_fuzzing_test_step = b.step("test-comprehensive-fuzzing", "Test unified fuzzing framework targeting 65% branch coverage");
+    comprehensive_fuzzing_test_step.dependOn(&run_comprehensive_fuzzing_test.step);
+    
+    // Combined fuzz testing step for all fuzzing components
+    const all_fuzzing_step = b.step("test-all-fuzzing", "Run all comprehensive fuzz tests (allocator errors, hardware absence, state fuzzing)");
+    all_fuzzing_step.dependOn(&run_fuzzing_allocator_test.step);
+    all_fuzzing_step.dependOn(&run_hardware_absence_test.step);
+    all_fuzzing_step.dependOn(&run_state_fuzzing_test.step);
+    all_fuzzing_step.dependOn(&run_comprehensive_fuzzing_test.step);
+    
     // Superoptimization setup and analysis commands
     const setup_minotaur_cmd = b.addSystemCommand(&[_][]const u8{ "bash", "scripts/setup_minotaur.sh" });
     const setup_minotaur_step = b.step("setup-minotaur", "Set up Minotaur SIMD superoptimizer");

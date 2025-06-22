@@ -66,7 +66,7 @@ pub const FuzzingAllocator = struct {
     config: FuzzingAllocatorConfig,
     
     // Allocation tracking
-    allocations: std.HashMap(usize, AllocationInfo),
+    allocations: std.AutoHashMap(usize, AllocationInfo),
     allocation_count: u64 = 0,
     total_allocated: usize = 0,
     total_freed: usize = 0,
@@ -75,8 +75,8 @@ pub const FuzzingAllocator = struct {
     // Failure injection state
     failure_count: u64 = 0,
     last_failure_allocation: u64 = 0,
-    random: std.rand.Random,
-    prng: std.rand.DefaultPrng,
+    random: std.Random,
+    prng: std.Random.DefaultPrng,
     
     // Critical path detection
     in_critical_path: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
@@ -84,12 +84,12 @@ pub const FuzzingAllocator = struct {
     const Self = @This();
     
     pub fn init(base_allocator: std.mem.Allocator, config: FuzzingAllocatorConfig) Self {
-        var prng = std.rand.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
+        var prng = std.Random.DefaultPrng.init(@intCast(std.time.nanoTimestamp()));
         
         return Self{
             .base_allocator = base_allocator,
             .config = config,
-            .allocations = std.HashMap(usize, AllocationInfo).init(base_allocator),
+            .allocations = std.AutoHashMap(usize, AllocationInfo).init(base_allocator),
             .random = prng.random(),
             .prng = prng,
         };
@@ -218,7 +218,7 @@ pub const FuzzingAllocator = struct {
         return false;
     }
     
-    fn alloc(ctx: *anyopaque, len: usize, log2_ptr_align: u8, return_address: usize) ?[*]u8 {
+    fn alloc(ctx: *anyopaque, len: usize, log2_ptr_align: std.mem.Alignment, return_address: usize) ?[*]u8 {
         const self: *Self = @ptrCast(@alignCast(ctx));
         
         // Check if we should fail this allocation
@@ -261,7 +261,7 @@ pub const FuzzingAllocator = struct {
         return result;
     }
     
-    fn resize(ctx: *anyopaque, buf: []u8, log2_buf_align: u8, new_len: usize, return_address: usize) bool {
+    fn resize(ctx: *anyopaque, buf: []u8, log2_buf_align: std.mem.Alignment, new_len: usize, return_address: usize) bool {
         const self: *Self = @ptrCast(@alignCast(ctx));
         
         // For resize, we might want to fail based on the size increase
@@ -296,7 +296,7 @@ pub const FuzzingAllocator = struct {
         return self.base_allocator.rawResize(buf, log2_buf_align, new_len, return_address);
     }
     
-    fn free(ctx: *anyopaque, buf: []u8, log2_buf_align: u8, return_address: usize) void {
+    fn free(ctx: *anyopaque, buf: []u8, log2_buf_align: std.mem.Alignment, return_address: usize) void {
         const self: *Self = @ptrCast(@alignCast(ctx));
         
         // Update tracking
@@ -327,9 +327,9 @@ pub const FuzzingAllocator = struct {
     pub const CriticalPathGuard = struct {
         allocator: *FuzzingAllocator,
         
-        pub fn init(allocator: *FuzzingAllocator) CriticalPathGuard {
-            allocator.enterCriticalPath();
-            return CriticalPathGuard{ .allocator = allocator };
+        pub fn init(fuzzing_allocator: *FuzzingAllocator) CriticalPathGuard {
+            fuzzing_allocator.enterCriticalPath();
+            return CriticalPathGuard{ .allocator = fuzzing_allocator };
         }
         
         pub fn deinit(self: CriticalPathGuard) void {
@@ -372,7 +372,7 @@ pub const FuzzingAllocator = struct {
     pub fn printStatistics(self: *const Self) void {
         const stats = self.getStatistics();
         
-        std.debug.print("\n=== FuzzingAllocator Statistics ===\n");
+        std.debug.print("\n=== FuzzingAllocator Statistics ===\n", .{});
         std.debug.print("Allocations attempted: {}\n", .{stats.allocations_attempted});
         std.debug.print("Allocations succeeded: {}\n", .{stats.allocations_succeeded});
         std.debug.print("Allocation failures: {} ({d:.1}%)\n", .{stats.allocation_failures, stats.failure_rate * 100.0});
@@ -381,7 +381,7 @@ pub const FuzzingAllocator = struct {
         std.debug.print("Peak allocated: {} bytes\n", .{stats.peak_allocated});
         std.debug.print("Current allocated: {} bytes\n", .{stats.current_allocated});
         std.debug.print("Active allocations: {}\n", .{stats.active_allocations});
-        std.debug.print("====================================\n");
+        std.debug.print("====================================\n", .{});
     }
     
     /// Reset statistics and failure injection state
@@ -481,7 +481,7 @@ test "FuzzingAllocator critical path targeting" {
     const allocator = fuzz_alloc.allocator();
     
     // Normal allocations might succeed
-    var ptr1 = allocator.alloc(u8, 100) catch null;
+    const ptr1 = allocator.alloc(u8, 100) catch null;
     if (ptr1) |p| allocator.free(p);
     
     // Critical path allocations are more likely to fail
