@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const simd = @import("simd.zig");
+const numa_mapping = @import("numa_mapping.zig");
 
 // CPU topology detection and thread affinity
 
@@ -27,7 +28,8 @@ pub const CpuCore = struct {
 };
 
 pub const NumaNode = struct {
-    id: u32,
+    logical_id: numa_mapping.LogicalNumaNodeId,  // Always use logical IDs internally
+    physical_id: numa_mapping.PhysicalNumaNodeId, // Keep physical ID for system interface
     cpus: []u32,
     memory_size: u64 = 0,
     distance_matrix: []u8,
@@ -37,6 +39,12 @@ pub const NumaNode = struct {
             self.distance_matrix[other_node] 
         else 
             100;
+    }
+    
+    /// Get distance to another logical NUMA node using unified mapping
+    pub fn distanceToLogical(self: *const NumaNode, mapper: *numa_mapping.NumaMapper, other_logical: numa_mapping.LogicalNumaNodeId) !u8 {
+        const distance_info = try mapper.getNumaDistance(self.logical_id, other_logical);
+        return distance_info.distance;
     }
 };
 
@@ -54,8 +62,11 @@ pub const CpuTopology = struct {
     
     // Lookup tables
     logical_to_physical: []u32,
-    logical_to_numa: []u32,
+    logical_to_numa: []numa_mapping.LogicalNumaNodeId,  // Use logical NUMA IDs
     logical_to_socket: []u32,
+    
+    // Unified NUMA mapping integration
+    numa_mapper: ?*numa_mapping.NumaMapper = null,
     
     pub fn deinit(self: *CpuTopology) void {
         for (self.cores) |*core| {
@@ -95,14 +106,36 @@ pub const CpuTopology = struct {
             if (shared == cpu2) return 3;
         }
         
-        // Same NUMA node
-        if (core1.numa_node == core2.numa_node) return 4;
+        // Same NUMA node (using logical NUMA IDs)
+        const cpu1_numa = self.logical_to_numa[cpu1];
+        const cpu2_numa = self.logical_to_numa[cpu2];
+        if (cpu1_numa == cpu2_numa) return 4;
         
         // Same socket
         if (core1.socket_id == core2.socket_id) return 5;
         
-        // Different socket
-        return 10 + self.numa_nodes[core1.numa_node].distanceTo(core2.numa_node);
+        // Different socket - use unified NUMA mapping for accurate distance
+        if (self.numa_mapper) |mapper| {
+            const numa_distance = mapper.getNumaDistance(cpu1_numa, cpu2_numa) catch {
+                // Fallback to legacy distance calculation on error
+                return 10 + self.numa_nodes[cpu1_numa].distanceTo(cpu2_numa);
+            };
+            return 10 + numa_distance.distance;
+        } else {
+            // Fallback when NUMA mapper is not available
+            return 10 + self.numa_nodes[cpu1_numa].distanceTo(cpu2_numa);
+        }
+    }
+    
+    /// Get logical NUMA node for a CPU using unified mapping
+    pub fn getCpuLogicalNumaNode(self: *const CpuTopology, cpu_id: u32) ?numa_mapping.LogicalNumaNodeId {
+        if (cpu_id >= self.logical_to_numa.len) return null;
+        return self.logical_to_numa[cpu_id];
+    }
+    
+    /// Set the NUMA mapper for enhanced distance calculations
+    pub fn setNumaMapper(self: *CpuTopology, mapper: *numa_mapping.NumaMapper) void {
+        self.numa_mapper = mapper;
     }
 };
 
@@ -175,7 +208,7 @@ fn detectTopologyLinux(allocator: std.mem.Allocator) !CpuTopology {
     
     for (cores_slice, 0..) |*core, i| {
         logical_to_physical[i] = core.physical_id;
-        logical_to_numa[i] = core.numa_node;
+        logical_to_numa[i] = 0; // Default to logical NUMA node 0 for now
         logical_to_socket[i] = core.socket_id;
     }
     
@@ -187,7 +220,8 @@ fn detectTopologyLinux(allocator: std.mem.Allocator) !CpuTopology {
     
     var numa_nodes = try allocator.alloc(NumaNode, 1);
     numa_nodes[0] = .{
-        .id = 0,
+        .logical_id = 0,    // Use logical ID
+        .physical_id = 0,   // Physical ID same as logical for single node
         .cpus = numa_cpus,
         .distance_matrix = try allocator.dupe(u8, &[_]u8{10}),
     };
@@ -248,7 +282,8 @@ fn detectTopologyFallback(allocator: std.mem.Allocator) !CpuTopology {
     
     var numa_nodes = try allocator.alloc(NumaNode, 1);
     numa_nodes[0] = .{
-        .id = 0,
+        .logical_id = 0,    // Use logical ID
+        .physical_id = 0,   // Physical ID same as logical for single node
         .cpus = numa_cpus,
         .distance_matrix = try allocator.dupe(u8, &[_]u8{10}),
     };

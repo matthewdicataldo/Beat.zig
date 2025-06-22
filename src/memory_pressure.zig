@@ -1,6 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const core = @import("core.zig");
+const numa_mapping = @import("numa_mapping.zig");
 
 // Memory-Aware Task Scheduling with Pressure Detection
 //
@@ -53,7 +54,29 @@ pub const MemoryPressureLevel = enum(u8) {
     }
 };
 
-/// Real-time memory pressure metrics from Linux PSI
+/// Per-NUMA node memory metrics using logical NUMA node IDs
+pub const NumaMemoryMetrics = struct {
+    logical_numa_node: numa_mapping.LogicalNumaNodeId,
+    memory_used_mb: u64 = 0,        // Memory used on this NUMA node (MB)
+    memory_total_mb: u64 = 0,       // Total memory on this NUMA node (MB)
+    memory_free_mb: u64 = 0,        // Free memory on this NUMA node (MB)
+    memory_used_pct: f32 = 0.0,     // % memory used on this NUMA node
+    
+    /// Check if this NUMA node is under memory pressure
+    pub fn isUnderPressure(self: NumaMemoryMetrics, threshold_pct: f32) bool {
+        return self.memory_used_pct > threshold_pct;
+    }
+    
+    /// Get available memory bandwidth estimate for this NUMA node
+    pub fn estimateAvailableBandwidth(self: NumaMemoryMetrics, base_bandwidth_mbps: u64) u64 {
+        // Reduce available bandwidth based on memory utilization
+        // High memory usage typically correlates with increased memory traffic
+        const utilization_factor = 1.0 - (self.memory_used_pct / 100.0);
+        return @intFromFloat(@as(f64, @floatFromInt(base_bandwidth_mbps)) * utilization_factor);
+    }
+};
+
+/// Real-time memory pressure metrics from Linux PSI with NUMA awareness
 pub const MemoryPressureMetrics = struct {
     // PSI pressure percentages (0.0-100.0)
     some_avg10: f32 = 0.0,    // % of time at least one task stalled (10s average)
@@ -67,6 +90,10 @@ pub const MemoryPressureMetrics = struct {
     memory_used_pct: f32 = 0.0,      // % of total memory used
     memory_available_mb: u64 = 0,     // Available memory in MB
     swap_used_pct: f32 = 0.0,         // % of swap space used
+    
+    // NUMA-aware memory metrics (using logical NUMA node IDs)
+    numa_metrics: []NumaMemoryMetrics = &[_]NumaMemoryMetrics{},
+    numa_metrics_available: bool = false,  // Whether per-NUMA metrics are available
     
     // Timestamps
     last_update_ns: u64 = 0,          // When metrics were last updated
@@ -95,15 +122,58 @@ pub const MemoryPressureMetrics = struct {
         return self.some_avg10 > self.some_avg60 and self.some_avg60 > self.some_avg300;
     }
     
+    /// Get the NUMA node with highest memory pressure
+    pub fn getHighestPressureNumaNode(self: *const MemoryPressureMetrics) ?numa_mapping.LogicalNumaNodeId {
+        if (!self.numa_metrics_available or self.numa_metrics.len == 0) return null;
+        
+        var highest_pressure: f32 = 0.0;
+        var highest_node: ?numa_mapping.LogicalNumaNodeId = null;
+        
+        for (self.numa_metrics) |numa_metric| {
+            if (numa_metric.memory_used_pct > highest_pressure) {
+                highest_pressure = numa_metric.memory_used_pct;
+                highest_node = numa_metric.logical_numa_node;
+            }
+        }
+        
+        return highest_node;
+    }
+    
+    /// Get memory pressure level for a specific logical NUMA node
+    pub fn getNumaNodePressureLevel(self: *const MemoryPressureMetrics, logical_numa: numa_mapping.LogicalNumaNodeId) ?MemoryPressureLevel {
+        if (!self.numa_metrics_available) return null;
+        
+        for (self.numa_metrics) |numa_metric| {
+            if (numa_metric.logical_numa_node == logical_numa) {
+                return MemoryPressureLevel.fromPercentage(numa_metric.memory_used_pct);
+            }
+        }
+        
+        return null;
+    }
+    
     /// Get human-readable description of current state
     pub fn getDescription(self: *const MemoryPressureMetrics, allocator: std.mem.Allocator) ![]u8 {
         const level = self.calculatePressureLevel();
         const trend = if (self.isPressureIncreasing()) "↑" else "→";
         
-        return std.fmt.allocPrint(allocator, 
-            "Memory Pressure: {s} {s} (PSI: {d:.1f}% some, {d:.1f}% full, Mem: {d:.1f}%)",
-            .{ @tagName(level), trend, self.some_avg10, self.full_avg10, self.memory_used_pct }
-        );
+        if (self.numa_metrics_available and self.numa_metrics.len > 0) {
+            const numa_info = if (self.getHighestPressureNumaNode()) |highest_node|
+                try std.fmt.allocPrint(allocator, ", Highest NUMA: {d}", .{highest_node})
+            else
+                try allocator.dupe(u8, "");
+            defer allocator.free(numa_info);
+            
+            return std.fmt.allocPrint(allocator, 
+                "Memory Pressure: {s} {s} (PSI: {d:.1}% some, {d:.1}% full, Mem: {d:.1}%{s})",
+                .{ @tagName(level), trend, self.some_avg10, self.full_avg10, self.memory_used_pct, numa_info }
+            );
+        } else {
+            return std.fmt.allocPrint(allocator, 
+                "Memory Pressure: {s} {s} (PSI: {d:.1}% some, {d:.1}% full, Mem: {d:.1}%)",
+                .{ @tagName(level), trend, self.some_avg10, self.full_avg10, self.memory_used_pct }
+            );
+        }
     }
 };
 
@@ -135,7 +205,7 @@ pub const MemoryPressureConfig = struct {
 // Memory Pressure Monitor
 // ============================================================================
 
-/// Thread-safe memory pressure monitor with protected state updates
+/// Thread-safe memory pressure monitor with protected state updates and NUMA awareness
 pub const MemoryPressureMonitor = struct {
     allocator: std.mem.Allocator,
     config: MemoryPressureConfig,
@@ -151,6 +221,9 @@ pub const MemoryPressureMonitor = struct {
     
     // Platform-specific handles
     psi_file: ?std.fs.File = null,
+    
+    // NUMA mapping integration - uses logical NUMA node IDs throughout
+    numa_mapper: ?*numa_mapping.NumaMapper = null,
     
     pub fn init(allocator: std.mem.Allocator, config: MemoryPressureConfig) !*MemoryPressureMonitor {
         const self = try allocator.create(MemoryPressureMonitor);
@@ -251,6 +324,65 @@ pub const MemoryPressureMonitor = struct {
         // 1. Not running and no thread handle (stopped state)
         // 2. Running and has thread handle (active state)
         return (running and has_thread) or (!running and !has_thread);
+    }
+    
+    /// Set NUMA mapper for NUMA-aware memory monitoring
+    /// This enables per-NUMA node memory pressure tracking using logical NUMA node IDs
+    pub fn setNumaMapper(self: *MemoryPressureMonitor, mapper: *numa_mapping.NumaMapper) !void {
+        self.numa_mapper = mapper;
+        
+        // Initialize NUMA-aware monitoring if metrics are available
+        self.metrics_mutex.lock();
+        defer self.metrics_mutex.unlock();
+        
+        try self.initializeNumaMetrics();
+    }
+    
+    /// Initialize per-NUMA memory metrics using logical NUMA node IDs
+    fn initializeNumaMetrics(self: *MemoryPressureMonitor) !void {
+        const mapper = self.numa_mapper orelse return;
+        
+        const numa_node_count = mapper.getNumaNodeCount();
+        if (numa_node_count == 0) return;
+        
+        // Allocate storage for per-NUMA metrics
+        const numa_metrics = try self.allocator.alloc(NumaMemoryMetrics, numa_node_count);
+        
+        // Initialize each NUMA node's metrics
+        for (numa_metrics, 0..) |*numa_metric, logical_idx| {
+            const logical_numa = @as(numa_mapping.LogicalNumaNodeId, @intCast(logical_idx));
+            const node_mapping = mapper.getNodeMapping(logical_numa) orelse continue;
+            
+            numa_metric.* = NumaMemoryMetrics{
+                .logical_numa_node = logical_numa,
+                .memory_total_mb = node_mapping.memory_size_mb,
+                .memory_used_mb = 0,
+                .memory_free_mb = node_mapping.memory_size_mb,
+                .memory_used_pct = 0.0,
+            };
+        }
+        
+        // Update current metrics to include NUMA information
+        self.current_metrics.numa_metrics = numa_metrics;
+        self.current_metrics.numa_metrics_available = true;
+    }
+    
+    /// Get memory pressure level for a specific logical NUMA node
+    pub fn getNumaNodePressureLevel(self: *const MemoryPressureMonitor, logical_numa: numa_mapping.LogicalNumaNodeId) ?MemoryPressureLevel {
+        const self_mut = @constCast(self);
+        self_mut.metrics_mutex.lock();
+        defer self_mut.metrics_mutex.unlock();
+        
+        return self.current_metrics.getNumaNodePressureLevel(logical_numa);
+    }
+    
+    /// Get the logical NUMA node with highest memory pressure
+    pub fn getHighestPressureNumaNode(self: *const MemoryPressureMonitor) ?numa_mapping.LogicalNumaNodeId {
+        const self_mut = @constCast(self);
+        self_mut.metrics_mutex.lock();
+        defer self_mut.metrics_mutex.unlock();
+        
+        return self.current_metrics.getHighestPressureNumaNode();
     }
     
     /// Update memory pressure metrics (called by monitoring thread)
