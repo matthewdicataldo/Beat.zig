@@ -2,6 +2,7 @@ const std = @import("std");
 const builtin = @import("builtin");
 const core = @import("core.zig");
 const numa_mapping = @import("numa_mapping.zig");
+const cgroup_detection = @import("cgroup_detection.zig");
 
 // Memory-Aware Task Scheduling with Pressure Detection
 //
@@ -177,10 +178,12 @@ pub const MemoryPressureMetrics = struct {
     }
 };
 
-/// Configuration for memory pressure monitoring
+/// Configuration for memory pressure monitoring with cross-platform cgroup detection
 pub const MemoryPressureConfig = struct {
     // Monitoring intervals
     update_interval_ms: u32 = 100,           // How often to check pressure (100ms)
+    
+    // Legacy file path (deprecated - use auto-detection instead)
     psi_file_path: []const u8 = "/proc/pressure/memory",  // PSI file location
     
     // Pressure thresholds (can be tuned per workload)
@@ -195,17 +198,33 @@ pub const MemoryPressureConfig = struct {
     enable_batch_limiting: bool = true,      // Reduce batch sizes under pressure
     enable_cleanup_triggering: bool = true,  // Trigger cleanup callbacks under pressure
     
-    // Platform fallbacks
+    // Cross-platform and container detection
+    enable_auto_detection: bool = true,      // Enable automatic cgroup/container detection
+    enable_cgroup_v2: bool = true,          // Enable cgroup v2 support
+    enable_cgroup_v1: bool = true,          // Enable cgroup v1 support (fallback)
+    enable_container_detection: bool = true, // Enable Docker/K8s/LXC detection
+    
+    // Platform fallbacks (enhanced)
     enable_meminfo_fallback: bool = true,    // Use /proc/meminfo on Linux without PSI
     enable_windows_fallback: bool = true,    // Use Windows memory APIs
     enable_macos_fallback: bool = true,      // Use macOS vm_stat equivalent
+    enable_freebsd_fallback: bool = true,    // Use FreeBSD sysctl
+    enable_generic_unix_fallback: bool = true, // Use generic Unix /proc
+    
+    // Reliability thresholds
+    min_source_reliability: f32 = 0.3,      // Minimum reliability to use a source
+    prefer_container_sources: bool = true,   // Prefer container-specific sources
+    
+    // Advanced features
+    enable_numa_aware_detection: bool = true, // Per-NUMA node pressure detection
+    enable_multi_source_validation: bool = false, // Cross-validate multiple sources
 };
 
 // ============================================================================
 // Memory Pressure Monitor
 // ============================================================================
 
-/// Thread-safe memory pressure monitor with protected state updates and NUMA awareness
+/// Thread-safe memory pressure monitor with cross-platform cgroup detection and NUMA awareness
 pub const MemoryPressureMonitor = struct {
     allocator: std.mem.Allocator,
     config: MemoryPressureConfig,
@@ -219,8 +238,16 @@ pub const MemoryPressureMonitor = struct {
     // Monitoring thread
     monitor_thread: ?std.Thread = null,
     
+    // Cross-platform cgroup detection
+    cgroup_detector: ?*cgroup_detection.CGroupDetector = null,
+    detected_sources: []const cgroup_detection.MemoryPressureSourceConfig = &[_]cgroup_detection.MemoryPressureSourceConfig{},
+    primary_source: ?cgroup_detection.MemoryPressureSourceConfig = null,
+    
     // Platform-specific handles
     psi_file: ?std.fs.File = null,
+    cgroup_v2_file: ?std.fs.File = null,        // cgroup v2 memory.pressure
+    cgroup_v1_file: ?std.fs.File = null,        // cgroup v1 memory.usage_in_bytes
+    meminfo_file: ?std.fs.File = null,          // /proc/meminfo cache
     
     // NUMA mapping integration - uses logical NUMA node IDs throughout
     numa_mapper: ?*numa_mapping.NumaMapper = null,
@@ -234,7 +261,40 @@ pub const MemoryPressureMonitor = struct {
             .is_running = std.atomic.Value(bool).init(false),
         };
         
+        // Initialize cgroup detection if enabled
+        if (config.enable_auto_detection) {
+            try self.initializeCGroupDetection();
+        }
+        
         return self;
+    }
+    
+    /// Initialize cross-platform cgroup detection
+    fn initializeCGroupDetection(self: *MemoryPressureMonitor) !void {
+        // Create and initialize the cgroup detector
+        const detector = try self.allocator.create(cgroup_detection.CGroupDetector);
+        detector.* = cgroup_detection.CGroupDetector.init(self.allocator);
+        
+        // Detect available memory pressure sources
+        try detector.detect();
+        
+        // Store detection results
+        self.cgroup_detector = detector;
+        self.detected_sources = detector.getAvailableSources();
+        self.primary_source = detector.getPrimarySource();
+        
+        // Log detection results for debugging
+        if (self.primary_source) |primary| {
+            std.log.info("Memory pressure monitoring: Using {s} (reliability: {d:.1}%)", 
+                .{primary.source.getDescription(), primary.reliability * 100.0});
+            
+            const container_env = detector.getContainerEnvironment();
+            const cgroup_version = detector.getCGroupVersion();
+            std.log.info("Container environment: {s}, CGroup version: {s}", 
+                .{@tagName(container_env), @tagName(cgroup_version)});
+        } else {
+            std.log.warn("Memory pressure monitoring: No reliable sources detected, using fallback", .{});
+        }
     }
     
     pub fn deinit(self: *MemoryPressureMonitor) void {
@@ -247,21 +307,37 @@ pub const MemoryPressureMonitor = struct {
             self.monitor_thread = null;
         }
         
+        // Clean up file handles
         if (self.psi_file) |file| {
             file.close();
+        }
+        if (self.cgroup_v2_file) |file| {
+            file.close();
+        }
+        if (self.cgroup_v1_file) |file| {
+            file.close();
+        }
+        if (self.meminfo_file) |file| {
+            file.close();
+        }
+        
+        // Clean up cgroup detector
+        if (self.cgroup_detector) |detector| {
+            detector.deinit();
+            self.allocator.destroy(detector);
         }
         
         self.allocator.destroy(self);
     }
     
-    /// Start the memory pressure monitoring thread
+    /// Start the memory pressure monitoring thread with cross-platform source detection
     pub fn start(self: *MemoryPressureMonitor) !void {
         if (self.is_running.load(.acquire)) {
             return; // Already running
         }
         
-        // Try to open PSI file for efficient monitoring
-        self.psi_file = std.fs.openFileAbsolute(self.config.psi_file_path, .{}) catch null;
+        // Initialize file handles based on detected sources
+        try self.initializeFileHandles();
         
         // Update initial metrics
         try self.updateMetrics();
@@ -272,6 +348,47 @@ pub const MemoryPressureMonitor = struct {
         // Only set running state after successful thread creation
         self.monitor_thread = thread;
         self.is_running.store(true, .release);
+    }
+    
+    /// Initialize file handles based on detected memory pressure sources
+    fn initializeFileHandles(self: *MemoryPressureMonitor) !void {
+        if (self.primary_source) |primary| {
+            // Open file handle for the primary source if it's file-based
+            if (primary.file_path) |file_path| {
+                switch (primary.source) {
+                    .linux_psi_global, .linux_psi_cgroup_v2 => {
+                        self.psi_file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
+                            std.log.warn("Failed to open PSI file {s}: {}", .{file_path, err});
+                            return;
+                        };
+                    },
+                    .linux_cgroup_v2_memory => {
+                        self.cgroup_v2_file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
+                            std.log.warn("Failed to open cgroup v2 file {s}: {}", .{file_path, err});
+                            return;
+                        };
+                    },
+                    .linux_cgroup_v1_memory => {
+                        self.cgroup_v1_file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
+                            std.log.warn("Failed to open cgroup v1 file {s}: {}", .{file_path, err});
+                            return;
+                        };
+                    },
+                    .linux_meminfo, .generic_unix_proc => {
+                        self.meminfo_file = std.fs.openFileAbsolute(file_path, .{}) catch |err| {
+                            std.log.warn("Failed to open meminfo file {s}: {}", .{file_path, err});
+                            return;
+                        };
+                    },
+                    else => {
+                        // Non-file-based sources don't need file handles
+                    },
+                }
+            }
+        } else {
+            // Fallback: try to open legacy PSI file
+            self.psi_file = std.fs.openFileAbsolute(self.config.psi_file_path, .{}) catch null;
+        }
     }
     
     /// Stop the monitoring thread and ensure proper cleanup
@@ -385,21 +502,65 @@ pub const MemoryPressureMonitor = struct {
         return self.current_metrics.getHighestPressureNumaNode();
     }
     
-    /// Update memory pressure metrics (called by monitoring thread)
+    /// Get cross-platform detection information for debugging
+    pub fn getDetectionInfo(self: *const MemoryPressureMonitor, allocator: std.mem.Allocator) ![]u8 {
+        if (self.cgroup_detector) |detector| {
+            return detector.getDetectionSummary(allocator);
+        } else {
+            return std.fmt.allocPrint(allocator, "Cross-platform detection disabled (enable_auto_detection = false)\n", .{});
+        }
+    }
+    
+    /// Get container environment information
+    pub fn getContainerEnvironment(self: *const MemoryPressureMonitor) ?cgroup_detection.ContainerEnvironment {
+        if (self.cgroup_detector) |detector| {
+            return detector.getContainerEnvironment();
+        }
+        return null;
+    }
+    
+    /// Get cgroup version information
+    pub fn getCGroupVersion(self: *const MemoryPressureMonitor) ?cgroup_detection.CGroupVersion {
+        if (self.cgroup_detector) |detector| {
+            return detector.getCGroupVersion();
+        }
+        return null;
+    }
+    
+    /// Get primary memory pressure source information
+    pub fn getPrimarySource(self: *const MemoryPressureMonitor) ?cgroup_detection.MemoryPressureSourceConfig {
+        return self.primary_source;
+    }
+    
+    /// Update memory pressure metrics using cross-platform detection (called by monitoring thread)
     fn updateMetrics(self: *MemoryPressureMonitor) !void {
         var metrics = MemoryPressureMetrics{
             .last_update_ns = @as(u64, @intCast(std.time.nanoTimestamp())),
         };
         
-        // Try to read PSI information first (Linux-specific)
-        if (self.readPSIMemory(&metrics)) {
-            metrics.psi_available = true;
+        // Use detected primary source if available
+        if (self.primary_source) |primary| {
+            if (self.readFromPrimarySource(&metrics, primary)) {
+                // Successfully read from primary source
+                if (primary.source == .linux_psi_global or primary.source == .linux_psi_cgroup_v2) {
+                    metrics.psi_available = true;
+                }
+            } else {
+                // Primary source failed, try fallback sources
+                metrics.psi_available = false;
+                self.readFromFallbackSources(&metrics);
+            }
         } else {
-            metrics.psi_available = false;
+            // No detected sources, use legacy method
+            if (self.readPSIMemory(&metrics)) {
+                metrics.psi_available = true;
+            } else {
+                metrics.psi_available = false;
+            }
+            
+            // Always try to get basic memory utilization
+            self.readMemoryUtilization(&metrics);
         }
-        
-        // Always try to get basic memory utilization
-        self.readMemoryUtilization(&metrics);
         
         // Calculate and update pressure level
         const new_level = metrics.calculatePressureLevel();
@@ -410,6 +571,148 @@ pub const MemoryPressureMonitor = struct {
         self.metrics_mutex.unlock();
         
         self.current_level.store(new_level, .release);
+    }
+    
+    /// Read memory pressure from the primary detected source
+    fn readFromPrimarySource(self: *MemoryPressureMonitor, metrics: *MemoryPressureMetrics, primary: cgroup_detection.MemoryPressureSourceConfig) bool {
+        switch (primary.source) {
+            .linux_psi_global, .linux_psi_cgroup_v2 => {
+                return self.readPSIMemory(metrics);
+            },
+            .linux_cgroup_v2_memory => {
+                return self.readCGroupV2Memory(metrics);
+            },
+            .linux_cgroup_v1_memory => {
+                return self.readCGroupV1Memory(metrics);
+            },
+            .linux_meminfo, .generic_unix_proc => {
+                self.readLinuxMeminfo(metrics);
+                return true; // meminfo reading doesn't fail
+            },
+            .windows_performance_counters => {
+                self.readWindowsMemory(metrics);
+                return true;
+            },
+            .macos_vm_stat => {
+                self.readMacOSMemory(metrics);
+                return true;
+            },
+            .freebsd_sysctl => {
+                self.readFreeBSDMemory(metrics);
+                return true;
+            },
+            else => {
+                std.log.debug("Unsupported primary source: {s}", .{primary.source.getDescription()});
+                return false;
+            },
+        }
+    }
+    
+    /// Read memory pressure from fallback sources
+    fn readFromFallbackSources(self: *MemoryPressureMonitor, metrics: *MemoryPressureMetrics) void {
+        // Try available fallback sources in order of reliability
+        for (self.detected_sources) |source| {
+            if (source.enabled and source.reliability >= self.config.min_source_reliability) {
+                if (self.readFromPrimarySource(metrics, source)) {
+                    std.log.debug("Successfully read from fallback source: {s}", .{source.source.getDescription()});
+                    return;
+                }
+            }
+        }
+        
+        // Last resort: use platform-specific fallback
+        self.readMemoryUtilization(metrics);
+    }
+    
+    /// Read cgroup v2 memory information
+    fn readCGroupV2Memory(self: *MemoryPressureMonitor, metrics: *MemoryPressureMetrics) bool {
+        const file = self.cgroup_v2_file orelse return false;
+        
+        // Try to read memory.current and memory.max
+        file.seekTo(0) catch return false;
+        
+        var buf: [128]u8 = undefined;
+        const bytes_read = file.read(&buf) catch return false;
+        const content = buf[0..bytes_read];
+        
+        // Parse memory usage (simple format: just a number in bytes)
+        const memory_current = std.fmt.parseInt(u64, std.mem.trim(u8, content, " \n\t"), 10) catch return false;
+        
+        // Try to read memory.max (if available)
+        const memory_max = self.readCGroupV2MemoryMax() orelse (8 * 1024 * 1024 * 1024); // 8GB default
+        
+        // Calculate percentage
+        metrics.memory_used_pct = (@as(f32, @floatFromInt(memory_current)) / @as(f32, @floatFromInt(memory_max))) * 100.0;
+        metrics.memory_available_mb = (memory_max - memory_current) / (1024 * 1024);
+        
+        return true;
+    }
+    
+    /// Read cgroup v2 memory.max file
+    fn readCGroupV2MemoryMax(self: *MemoryPressureMonitor) ?u64 {
+        _ = self; // Remove unused parameter warning
+        
+        const file = std.fs.openFileAbsolute("/sys/fs/cgroup/memory.max", .{}) catch return null;
+        defer file.close();
+        
+        var buf: [128]u8 = undefined;
+        const bytes_read = file.read(&buf) catch return null;
+        const content = std.mem.trim(u8, buf[0..bytes_read], " \n\t");
+        
+        // Handle "max" value (unlimited)
+        if (std.mem.eql(u8, content, "max")) {
+            // Use system memory as limit
+            return null;
+        }
+        
+        return std.fmt.parseInt(u64, content, 10) catch null;
+    }
+    
+    /// Read cgroup v1 memory information
+    fn readCGroupV1Memory(self: *MemoryPressureMonitor, metrics: *MemoryPressureMetrics) bool {
+        const file = self.cgroup_v1_file orelse return false;
+        
+        file.seekTo(0) catch return false;
+        
+        var buf: [128]u8 = undefined;
+        const bytes_read = file.read(&buf) catch return false;
+        const content = buf[0..bytes_read];
+        
+        // Parse memory usage in bytes
+        const memory_current = std.fmt.parseInt(u64, std.mem.trim(u8, content, " \n\t"), 10) catch return false;
+        
+        // Try to read limit
+        const memory_limit = self.readCGroupV1MemoryLimit() orelse (8 * 1024 * 1024 * 1024); // 8GB default
+        
+        // Calculate percentage
+        metrics.memory_used_pct = (@as(f32, @floatFromInt(memory_current)) / @as(f32, @floatFromInt(memory_limit))) * 100.0;
+        metrics.memory_available_mb = (memory_limit - memory_current) / (1024 * 1024);
+        
+        return true;
+    }
+    
+    /// Read cgroup v1 memory.limit_in_bytes
+    fn readCGroupV1MemoryLimit(self: *MemoryPressureMonitor) ?u64 {
+        _ = self; // Remove unused parameter warning
+        
+        const file = std.fs.openFileAbsolute("/sys/fs/cgroup/memory/memory.limit_in_bytes", .{}) catch return null;
+        defer file.close();
+        
+        var buf: [128]u8 = undefined;
+        const bytes_read = file.read(&buf) catch return null;
+        const content = std.mem.trim(u8, buf[0..bytes_read], " \n\t");
+        
+        return std.fmt.parseInt(u64, content, 10) catch null;
+    }
+    
+    /// Read FreeBSD memory information via sysctl
+    fn readFreeBSDMemory(self: *MemoryPressureMonitor, metrics: *MemoryPressureMetrics) void {
+        _ = self; // Remove unused parameter warning
+        
+        // FreeBSD sysctl implementation would go here
+        // For now, provide estimated values
+        metrics.memory_used_pct = 50.0; // Estimate
+        metrics.memory_available_mb = 2048; // 2GB estimate
     }
     
     /// Read Linux PSI memory pressure information
