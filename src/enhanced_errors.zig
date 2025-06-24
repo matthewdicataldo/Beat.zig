@@ -325,26 +325,23 @@ pub fn logEnhancedError(
     error_value: error_type,
     context: []const u8,
 ) void {
-    switch (error_value) {
-        ConfigError.MissingBuildConfig => {
-            std.log.err("{s}", .{formatMissingBuildConfigError(context)});
-        },
-        ConfigError.HardwareDetectionFailed => {
-            std.log.warn("{s}", .{formatHardwareDetectionError()});
-        },
-        ConfigError.UnsupportedPlatform => {
-            std.log.err("{s}", .{formatUnsupportedPlatformError(context)});
-        },
-        ConfigError.InvalidConfiguration => {
-            std.log.err("{s}", .{formatDependencyChainError(context)});
-        },
-        else => {
-            // Fallback for other errors
-            std.log.err("Beat.zig Error: {} in context: {s}\n" ++
-                       "💡 Check documentation: https://beat-zig.github.io/Beat.zig/\n" ++
-                       "🆘 Need help? https://github.com/Beat-zig/Beat.zig/issues", 
-                       .{ error_value, context });
-        },
+    // Convert error to string for pattern matching
+    const error_name = @errorName(error_value);
+    
+    if (std.mem.eql(u8, error_name, "MissingBuildConfig")) {
+        std.log.err("{s}", .{formatMissingBuildConfigError(context)});
+    } else if (std.mem.eql(u8, error_name, "HardwareDetectionFailed")) {
+        std.log.warn("{s}", .{formatHardwareDetectionError()});
+    } else if (std.mem.eql(u8, error_name, "UnsupportedPlatform")) {
+        std.log.err("{s}", .{formatUnsupportedPlatformError(context)});
+    } else if (std.mem.eql(u8, error_name, "InvalidConfiguration")) {
+        std.log.err("{s}", .{formatDependencyChainError(context)});
+    } else {
+        // Fallback for other errors
+        std.log.err("Beat.zig Error: {} in context: {s}\n" ++
+                   "💡 Check documentation: https://beat-zig.github.io/Beat.zig/\n" ++
+                   "🆘 Need help? https://github.com/Beat-zig/Beat.zig/issues", 
+                   .{ error_value, context });
     }
 }
 
