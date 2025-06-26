@@ -1,6 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const zigpulse = @import("zigpulse.zig");
+const zigpulse = @import("zigpulse");
 
 // Comprehensive benchmarks for ZigPulse
 
@@ -31,9 +31,9 @@ fn Timer() type {
         
         pub fn lap(self: *Self) u64 {
             const now = std.time.nanoTimestamp();
-            const elapsed = @as(u64, @intCast(now - self.start_time));
+            const lap_time = @as(u64, @intCast(now - self.start_time));
             self.start_time = now;
-            return elapsed;
+            return lap_time;
         }
         
         pub fn elapsed(self: Self) u64 {
@@ -328,6 +328,7 @@ fn benchmarkForkJoin(allocator: std.mem.Allocator, config: BenchmarkConfig) !voi
 // =============================================================================
 
 fn benchmarkParallelPatterns(allocator: std.mem.Allocator, config: BenchmarkConfig) !void {
+    _ = config;
     std.debug.print("\n=== Benchmark: Parallel Patterns ===\n", .{});
     
     const pool = try zigpulse.createPool(allocator);

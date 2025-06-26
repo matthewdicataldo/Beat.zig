@@ -475,6 +475,12 @@ pub const SIMDTaskBatch = struct {
             try self.prepareBatch();
         }
         
+        // Lazy initialization: Generate execution function when actually needed
+        if (self.execution_function == null) {
+            const batch_profile = self.analyzeBatchProfile();
+            self.execution_function = self.selectExecutionFunction(batch_profile);
+        }
+        
         if (self.execution_function) |func| {
             const start_time = std.time.nanoTimestamp();
             
@@ -482,6 +488,12 @@ pub const SIMDTaskBatch = struct {
             if (self.simd_aligned_data) |data| {
                 func(data.ptr, self.batch_size, self.vector_width) catch |err| {
                     // Log execution error and propagate to caller
+                    std.log.err("SIMD batch execution failed: {} (batch_size={}, vector_width={})", .{ err, self.batch_size, self.vector_width });
+                    return err;
+                };
+            } else {
+                // If no aligned data, execute with minimal overhead for small batches
+                func(@as(*anyopaque, @ptrCast(&self.tasks.items[0])), self.batch_size, self.vector_width) catch |err| {
                     std.log.err("SIMD batch execution failed: {} (batch_size={}, vector_width={})", .{ err, self.batch_size, self.vector_width });
                     return err;
                 };

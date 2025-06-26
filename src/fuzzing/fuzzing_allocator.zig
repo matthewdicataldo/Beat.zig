@@ -124,6 +124,7 @@ pub const FuzzingAllocator = struct {
                 .alloc = alloc,
                 .resize = resize,
                 .free = free,
+                .remap = remap,
             },
         };
     }
@@ -311,6 +312,11 @@ pub const FuzzingAllocator = struct {
         }
         
         self.base_allocator.rawFree(buf, log2_buf_align, return_address);
+    }
+    
+    fn remap(ctx: *anyopaque, buf: []u8, log2_buf_align: std.mem.Alignment, new_len: usize, return_address: usize) bool {
+        const self: *Self = @ptrCast(@alignCast(ctx));
+        return self.base_allocator.rawRemap(buf, log2_buf_align, new_len, return_address);
     }
     
     /// Mark the beginning of a critical path for targeted failure injection

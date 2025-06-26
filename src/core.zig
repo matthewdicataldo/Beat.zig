@@ -13,6 +13,7 @@ pub const testing = @import("testing.zig");
 pub const ispc_cleanup = @import("ispc_cleanup_coordinator.zig");
 // Use unified build configuration that consolidates all build options
 pub const build_opts = @import("build_config_unified.zig");
+pub const advanced_features = @import("advanced_features_config.zig");
 pub const comptime_work = @import("comptime_work.zig");
 pub const enhanced_errors = @import("enhanced_errors.zig");
 pub const fingerprint = @import("fingerprint.zig");
@@ -58,7 +59,7 @@ pub const Config = struct {
     
     // V1 features
     enable_work_stealing: bool = true,       // Work-stealing between threads
-    enable_adaptive_sizing: bool = false,    // Dynamic worker count
+    enable_adaptive_sizing: bool = advanced_features.global_config.enable_development_mode,    // Dynamic worker count
     
     // V2 features (heartbeat scheduling)
     enable_heartbeat: bool = true,           // Heartbeat scheduling
@@ -66,11 +67,11 @@ pub const Config = struct {
     promotion_threshold: u64 = 10,           // Work:overhead ratio
     min_work_cycles: u64 = 1000,            // Min cycles for promotion
     
-    // V3 features - auto-enabled based on hardware detection
-    enable_topology_aware: bool = build_opts.performance.enable_topology_aware,
-    enable_numa_aware: bool = build_opts.performance.enable_numa_aware,
+    // V3 features - ENABLED BY DEFAULT with automatic fallback
+    enable_topology_aware: bool = advanced_features.global_config.enable_topology_awareness,
+    enable_numa_aware: bool = advanced_features.global_config.enable_numa_awareness,
     enable_lock_free: bool = true,          // Lock-free data structures
-    enable_predictive: bool = true,          // Predictive scheduling with One Euro Filter
+    enable_predictive: bool = advanced_features.global_config.enable_predictive_scheduling,
     
     // One Euro Filter parameters for task execution prediction
     // Auto-tuned based on hardware characteristics, but can be overridden
@@ -86,26 +87,41 @@ pub const Config = struct {
     enable_statistics: bool = true,          
     enable_trace: bool = false,
     
-    // Advanced worker selection (Task 2.4.2)
-    enable_advanced_selection: bool = true,        // Use multi-criteria optimization
+    // Advanced worker selection - ENABLED BY DEFAULT with fallback
+    enable_advanced_selection: bool = advanced_features.global_config.enable_advanced_worker_selection,
     selection_criteria: ?advanced_worker_selection.SelectionCriteria = null,  // null = auto-detect optimal
-    enable_selection_learning: bool = true,       // Adaptive criteria adjustment
+    enable_selection_learning: bool = advanced_features.global_config.enable_advanced_worker_selection,
     
-    // Development mode configuration
-    development_mode: bool = false,               // Enable comprehensive development features
-    verbose_logging: bool = false,                // Detailed operation logging
-    performance_validation: bool = false,        // Runtime performance checks
-    memory_debugging: bool = false,               // Enhanced memory tracking
-    task_tracing: bool = false,                   // Individual task execution tracing
-    scheduler_profiling: bool = false,            // Detailed scheduler performance profiling
+    // SIMD and ISPC acceleration - ENABLED BY DEFAULT with fallback
+    enable_ispc_acceleration: bool = advanced_features.global_config.enable_ispc_acceleration,
+    enable_simd_classification: bool = advanced_features.global_config.enable_simd_classification,
+    enable_triple_optimization: bool = advanced_features.global_config.enable_triple_optimization,
     
-    // Souper mathematical optimizations (Phase 6)
-    enable_souper_optimizations: ?bool = null,    // null = auto-enable, true/false = force on/off
-    deadlock_detection: bool = false,             // Runtime deadlock detection
-    resource_leak_detection: bool = false,        // Resource cleanup validation
+    // Monitoring and observability - ENABLED BY DEFAULT with fallback
+    enable_memory_pressure_monitoring: bool = advanced_features.global_config.enable_memory_pressure_monitoring,
+    enable_opentelemetry: bool = advanced_features.global_config.enable_opentelemetry,
+    enable_advanced_error_reporting: bool = advanced_features.global_config.enable_advanced_error_reporting,
+    enable_background_profiling: bool = advanced_features.global_config.enable_background_profiling,
+    
+    // Development mode configuration - AUTO-ENABLED in debug builds
+    development_mode: bool = advanced_features.global_config.enable_development_mode,
+    verbose_logging: bool = advanced_features.global_config.enable_verbose_logging,
+    performance_validation: bool = advanced_features.global_config.enable_development_mode,
+    memory_debugging: bool = advanced_features.global_config.enable_memory_debugging,
+    task_tracing: bool = advanced_features.global_config.enable_task_tracing,
+    scheduler_profiling: bool = advanced_features.global_config.enable_scheduler_profiling,
+    
+    // Mathematical optimizations - ENABLED BY DEFAULT with fallback
+    enable_souper_optimizations: ?bool = if (advanced_features.global_config.enable_souper_optimizations) true else null,
+    enable_minotaur_optimizations: bool = advanced_features.global_config.enable_minotaur_optimizations,
+    deadlock_detection: bool = advanced_features.global_config.enable_deadlock_detection,
+    resource_leak_detection: bool = advanced_features.global_config.enable_resource_leak_detection,
     
     /// Create a development configuration with comprehensive debugging enabled
     pub fn createDevelopmentConfig() Config {
+        // Initialize advanced features for development
+        advanced_features.initializeAdvancedFeatures(advanced_features.AdvancedFeaturesConfig.createDevelopmentConfig());
+        
         var config = Config{};
         config.development_mode = true;
         config.verbose_logging = true;
@@ -118,6 +134,17 @@ pub const Config = struct {
         config.enable_trace = true;
         config.enable_statistics = true;
         
+        // Enable advanced features for development
+        config.enable_ispc_acceleration = true;
+        config.enable_simd_classification = true;
+        config.enable_triple_optimization = true;
+        config.enable_memory_pressure_monitoring = true;
+        config.enable_opentelemetry = true;
+        config.enable_advanced_error_reporting = true;
+        config.enable_background_profiling = true;
+        config.enable_souper_optimizations = true;
+        config.enable_minotaur_optimizations = true;
+        
         // Conservative settings for debugging
         config.num_workers = 2;  // Smaller pool for easier debugging
         config.task_queue_size = 16; // Smaller queue for faster issue detection
@@ -128,6 +155,9 @@ pub const Config = struct {
     
     /// Create a testing configuration optimized for unit tests
     pub fn createTestingConfig() Config {
+        // Initialize advanced features for CI/testing
+        advanced_features.initializeAdvancedFeatures(advanced_features.AdvancedFeaturesConfig.createCIConfig());
+        
         var config = Config{};
         config.development_mode = true;
         config.verbose_logging = false; // Reduce noise in tests
@@ -135,6 +165,16 @@ pub const Config = struct {
         config.memory_debugging = true;
         config.resource_leak_detection = true;
         config.enable_statistics = true;
+        
+        // Enable comprehensive advanced features for testing
+        config.enable_ispc_acceleration = true;
+        config.enable_simd_classification = true;
+        config.enable_triple_optimization = true;
+        config.enable_memory_pressure_monitoring = true;
+        config.enable_advanced_error_reporting = true;
+        config.enable_souper_optimizations = true;
+        config.enable_minotaur_optimizations = true;
+        config.deadlock_detection = true;
         
         // Fast, small configuration for tests
         config.num_workers = 2;
@@ -147,16 +187,111 @@ pub const Config = struct {
     
     /// Create a profiling configuration optimized for performance analysis
     pub fn createProfilingConfig() Config {
+        // Initialize advanced features for production profiling
+        advanced_features.initializeAdvancedFeatures(advanced_features.AdvancedFeaturesConfig.createProductionConfig());
+        
         var config = Config{};
-        config.development_mode = true;
+        config.development_mode = false; // Production-like for accurate profiling
         config.verbose_logging = false;
         config.performance_validation = false; // Disable to avoid interference
         config.scheduler_profiling = true;
         config.task_tracing = false; // Disable to reduce overhead
         config.enable_statistics = true;
         
+        // Enable all performance features for comprehensive profiling
+        config.enable_ispc_acceleration = true;
+        config.enable_simd_classification = true;
+        config.enable_triple_optimization = true;
+        config.enable_memory_pressure_monitoring = true;
+        config.enable_advanced_error_reporting = true;
+        config.enable_background_profiling = true;
+        config.enable_souper_optimizations = true;
+        config.enable_minotaur_optimizations = true;
+        
         // Optimal performance settings for accurate profiling
         // Use default optimized values from build_opts
+        return config;
+    }
+    
+    /// Create a production configuration with all advanced features enabled
+    pub fn createProductionConfig() Config {
+        // Initialize advanced features for production
+        advanced_features.initializeAdvancedFeatures(advanced_features.AdvancedFeaturesConfig.createProductionConfig());
+        
+        var config = Config{};
+        
+        // Production optimization settings
+        config.development_mode = false;
+        config.verbose_logging = false;
+        config.performance_validation = false;
+        config.memory_debugging = false;
+        config.task_tracing = true; // Keep for production monitoring
+        config.scheduler_profiling = true; // Keep for production optimization
+        config.deadlock_detection = false; // Disable for performance
+        config.resource_leak_detection = true; // Keep for production stability
+        config.enable_statistics = true;
+        
+        // Enable ALL advanced features with fallback support
+        config.enable_ispc_acceleration = true;
+        config.enable_simd_classification = true;
+        config.enable_triple_optimization = true;
+        config.enable_memory_pressure_monitoring = true;
+        config.enable_opentelemetry = true;
+        config.enable_advanced_error_reporting = true;
+        config.enable_background_profiling = true;
+        config.enable_souper_optimizations = true;
+        config.enable_minotaur_optimizations = true;
+        config.enable_topology_aware = true;
+        config.enable_numa_aware = true;
+        config.enable_predictive = true;
+        config.enable_advanced_selection = true;
+        config.enable_selection_learning = true;
+        
+        // Optimal performance settings
+        config.heartbeat_interval_us = 100;
+        config.promotion_threshold = 10;
+        
+        return config;
+    }
+    
+    /// Create an embedded/resource-constrained configuration
+    pub fn createEmbeddedConfig() Config {
+        // Initialize advanced features for embedded systems
+        advanced_features.initializeAdvancedFeatures(advanced_features.AdvancedFeaturesConfig.createEmbeddedConfig());
+        
+        var config = Config{};
+        
+        // Minimal settings for embedded
+        config.development_mode = false;
+        config.verbose_logging = false;
+        config.performance_validation = false;
+        config.memory_debugging = false;
+        config.task_tracing = false;
+        config.scheduler_profiling = false;
+        config.deadlock_detection = false;
+        config.resource_leak_detection = true; // Critical for embedded
+        config.enable_statistics = false;
+        
+        // Selective advanced features for embedded
+        config.enable_ispc_acceleration = false; // May not be available
+        config.enable_simd_classification = true; // Lightweight, good ROI
+        config.enable_triple_optimization = false; // Too heavy
+        config.enable_memory_pressure_monitoring = true; // Critical for embedded
+        config.enable_opentelemetry = false; // Too heavy
+        config.enable_advanced_error_reporting = false; // Reduce overhead
+        config.enable_background_profiling = false; // Reduce overhead
+        config.enable_souper_optimizations = false; // Too heavy
+        config.enable_minotaur_optimizations = false; // Too heavy
+        config.enable_topology_aware = true; // Lightweight, good ROI
+        config.enable_numa_aware = false; // Usually single-node
+        config.enable_predictive = true; // Lightweight, good ROI
+        config.enable_advanced_selection = false; // Reduce complexity
+        
+        // Conservative settings for embedded
+        config.num_workers = 2;
+        config.task_queue_size = 32;
+        config.heartbeat_interval_us = 200; // Less frequent for lower overhead
+        
         return config;
     }
     
@@ -1829,8 +1964,12 @@ pub const ThreadPool = struct {
 // Public API
 // ============================================================================
 
-/// Create a thread pool with default configuration
+/// Create a thread pool with DEFAULT ADVANCED FEATURES ENABLED
+/// This is now the recommended way to create a Beat.zig thread pool
+/// All advanced features are enabled by default with automatic fallback support
 pub fn createPool(allocator: std.mem.Allocator) !*ThreadPool {
+    // Initialize advanced features with auto-detected configuration
+    advanced_features.initializeAdvancedFeatures(advanced_features.AdvancedFeaturesConfig.createAutoConfig());
     return ThreadPool.init(allocator, Config{});
 }
 
@@ -1839,21 +1978,42 @@ pub fn createPoolWithConfig(allocator: std.mem.Allocator, config: Config) !*Thre
     return ThreadPool.init(allocator, config);
 }
 
+/// Create a thread pool with PRODUCTION-OPTIMIZED advanced features
+/// Enables all performance optimizations with minimal debugging overhead
+pub fn createProductionPool(allocator: std.mem.Allocator) !*ThreadPool {
+    const production_config = Config.createProductionConfig();
+    return ThreadPool.init(allocator, production_config);
+}
+
+/// Create a thread pool with DEVELOPMENT features enabled
+/// Includes comprehensive debugging, profiling, and validation features
+pub fn createDevelopmentPool(allocator: std.mem.Allocator) !*ThreadPool {
+    const dev_config = Config.createDevelopmentConfig();
+    return ThreadPool.init(allocator, dev_config);
+}
+
+/// Create a thread pool optimized for EMBEDDED/resource-constrained systems
+/// Selective advanced features with minimal resource usage
+pub fn createEmbeddedPool(allocator: std.mem.Allocator) !*ThreadPool {
+    const embedded_config = Config.createEmbeddedConfig();
+    return ThreadPool.init(allocator, embedded_config);
+}
+
 /// Create a thread pool with auto-detected optimal configuration
 pub fn createOptimalPool(allocator: std.mem.Allocator) !*ThreadPool {
     const optimal_config = build_opts.getOptimalConfig();
     return ThreadPool.init(allocator, optimal_config);
 }
 
-/// Create a thread pool optimized for testing
+/// Create a thread pool optimized for testing with advanced features
 pub fn createTestPool(allocator: std.mem.Allocator) !*ThreadPool {
-    const test_config = build_opts.getTestConfig();
+    const test_config = Config.createTestingConfig();
     return ThreadPool.init(allocator, test_config);
 }
 
-/// Create a thread pool optimized for benchmarking
+/// Create a thread pool optimized for benchmarking with all performance features
 pub fn createBenchmarkPool(allocator: std.mem.Allocator) !*ThreadPool {
-    const benchmark_config = build_opts.getBenchmarkConfig();
+    const benchmark_config = Config.createProfilingConfig();
     return ThreadPool.init(allocator, benchmark_config);
 }
 

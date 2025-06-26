@@ -111,7 +111,7 @@ pub const HardwareAbsenceSimulator = struct {
     };
     
     pub fn init(allocator: std.mem.Allocator, config: HardwareAbsenceConfig) Self {
-        const seed = config.failure_injection_seed orelse @intCast(std.time.nanoTimestamp());
+        const seed = config.failure_injection_seed orelse @as(u64, @intCast(std.time.nanoTimestamp()));
         var prng = std.rand.DefaultPrng.init(seed);
         
         return Self{
@@ -176,7 +176,7 @@ pub const HardwareAbsenceSimulator = struct {
     pub fn simulateComponentAbsence(self: *Self, component: HardwareComponent) !void {
         const failure = SimulatedFailure{
             .component = component,
-            .timestamp = @intCast(std.time.nanoTimestamp()),
+            .timestamp = @as(u64, @intCast(std.time.nanoTimestamp())),
             .context = self.getComponentContext(component),
             .impact_level = self.getComponentImpact(component),
         };
@@ -297,6 +297,7 @@ pub const HardwareAbsenceSimulator = struct {
     }
     
     fn backupSIMDFeatures(self: *Self) !simd.SIMDFeatures {
+        _ = self;
         // Backup current SIMD features
         return simd.SIMDFeatures{
             .sse_available = true,

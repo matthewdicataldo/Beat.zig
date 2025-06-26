@@ -84,7 +84,7 @@ pub const StateComponent = enum {
 /// State fuzzer with comprehensive component interaction testing
 pub const StateFuzzer = struct {
     config: StateFuzzingConfig,
-    random: std.rand.Random,
+    random: std.Random,
     prng: std.rand.DefaultPrng,
     
     // State tracking
@@ -151,7 +151,7 @@ pub const StateFuzzer = struct {
     };
     
     pub fn init(allocator: std.mem.Allocator, config: StateFuzzingConfig) Self {
-        const seed = config.fuzzing_seed orelse @intCast(std.time.nanoTimestamp());
+        const seed = config.fuzzing_seed orelse @as(u64, @intCast(std.time.nanoTimestamp()));
         var prng = std.rand.DefaultPrng.init(seed);
         
         return Self{
@@ -181,7 +181,7 @@ pub const StateFuzzer = struct {
     pub fn start(self: *Self) !void {
         if (self.fuzzing_active) return;
         
-        self.start_time = @intCast(std.time.nanoTimestamp());
+        self.start_time = @as(u64, @intCast(std.time.nanoTimestamp()));
         self.should_stop.store(false, .monotonic);
         
         // Capture original states
@@ -254,7 +254,7 @@ pub const StateFuzzer = struct {
             .corruption_type = corruption_type,
             .original_value = try self.captureComponentState(component),
             .corrupted_value = try self.generateCorruptedValue(component, corruption_type),
-            .timestamp = @intCast(std.time.nanoTimestamp()),
+            .timestamp = @as(u64, @intCast(std.time.nanoTimestamp())),
             .thread_id = std.Thread.getCurrentId(),
         };
         
@@ -273,7 +273,7 @@ pub const StateFuzzer = struct {
     pub fn detectRaceCondition(self: *Self, comp_a: StateComponent, comp_b: StateComponent, 
                               op_a: []const u8, op_b: []const u8) !void {
         // Simple race detection based on timing
-        const now = @intCast(std.time.nanoTimestamp());
+        const now = @as(u64, @intCast(std.time.nanoTimestamp()));
         const race_window_ns = 1000000; // 1ms race detection window
         
         // Check if operations are happening concurrently
@@ -312,7 +312,7 @@ pub const StateFuzzer = struct {
         
         try writer.print("=== State Fuzzing Report ===\n");
         try writer.print("Fuzzing Active: {}\n", .{self.fuzzing_active});
-        try writer.print("Duration: {}ms\n", .{@divTrunc(@intCast(std.time.nanoTimestamp()) - self.start_time, 1000000)});
+        try writer.print("Duration: {}ms\n", .{@divTrunc(@as(u64, @intCast(std.time.nanoTimestamp())) - self.start_time, 1000000)});
         try writer.print("State Corruptions: {}\n", .{self.corrupted_states.items.len});
         try writer.print("Race Conditions: {}\n", .{self.race_conditions.items.len});
         try writer.print("State Snapshots: {}\n\n", .{self.snapshot_count});
@@ -371,7 +371,7 @@ pub const StateFuzzer = struct {
             const state_data = try self.captureComponentState(component);
             const snapshot = StateSnapshot{
                 .component = component,
-                .timestamp = @intCast(std.time.nanoTimestamp()),
+                .timestamp = @as(u64, @intCast(std.time.nanoTimestamp())),
                 .data = state_data,
                 .checksum = self.calculateChecksum(state_data),
             };
@@ -382,7 +382,6 @@ pub const StateFuzzer = struct {
     
     fn captureComponentState(self: *Self, component: StateComponent) ![]u8 {
         // Implementation would capture actual component state
-        _ = self;
         var data = std.ArrayList(u8).init(self.allocator);
         
         switch (component) {
@@ -438,7 +437,7 @@ pub const StateFuzzer = struct {
     fn runFuzzingLoop(self: *Self) !void {
         const end_time = self.start_time + (self.config.fuzzing_duration_ms * 1000000);
         
-        while (@intCast(std.time.nanoTimestamp()) < end_time and !self.should_stop.load(.monotonic)) {
+        while (@as(u64, @intCast(std.time.nanoTimestamp())) < end_time and !self.should_stop.load(.monotonic)) {
             // Take state snapshot
             self.snapshot_count += 1;
             
