@@ -41,6 +41,8 @@ pub fn build(b: *std.Build) void {
 
     // Set optimal test parallelization
     // Note: Test parallelization will be handled by our enhanced testing framework
+    
+    // Note: ISPC linking will be added to main tests after ISPC objects are compiled
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run unit tests");
@@ -1274,6 +1276,51 @@ pub fn build(b: *std.Build) void {
         for (ispc_steps.items) |ispc_step| {
             cross_library_benchmark.step.dependOn(ispc_step);
         }
+        
+        // Add ISPC runtime stubs to cross-library benchmark
+        const cross_lib_runtime_stubs = b.addObject(.{
+            .name = "cross_lib_ispc_runtime_stubs",
+            .root_source_file = b.path("src/ispc_runtime_stubs.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        cross_library_benchmark.addObject(cross_lib_runtime_stubs);
+        
+        // Link ISPC objects to main tests for comprehensive optimization testing
+        for (ispc_obj_paths.items) |obj_path| {
+            tests.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        tests.addIncludePath(b.path("zig-cache/ispc"));
+        for (ispc_steps.items) |ispc_step| {
+            tests.step.dependOn(ispc_step);
+        }
+        
+        // Add ISPC runtime stubs for missing runtime functions
+        const ispc_runtime_stubs = b.addObject(.{
+            .name = "ispc_runtime_stubs",
+            .root_source_file = b.path("src/ispc_runtime_stubs.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        tests.addObject(ispc_runtime_stubs);
+        
+        // Link ISPC objects to main benchmark
+        for (ispc_obj_paths.items) |obj_path| {
+            benchmark_exe.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        benchmark_exe.addIncludePath(b.path("zig-cache/ispc"));
+        for (ispc_steps.items) |ispc_step| {
+            benchmark_exe.step.dependOn(ispc_step);
+        }
+        
+        // Add ISPC runtime stubs to benchmark
+        const benchmark_runtime_stubs = b.addObject(.{
+            .name = "benchmark_ispc_runtime_stubs",
+            .root_source_file = b.path("src/ispc_runtime_stubs.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        benchmark_exe.addObject(benchmark_runtime_stubs);
     }
 
     // Minotaur SIMD superoptimization tests

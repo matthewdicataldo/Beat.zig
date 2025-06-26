@@ -40,29 +40,43 @@ export void ispc_compute_similarity_matrix_soa(
     uniform float similarity_matrix[],
     uniform int count
 ) {
-    // Compute similarity matrix with optimal memory access patterns
-    foreach (i = 0 ... count) {
-        uint64 fp_i_low = fingerprints_low[i];
-        uint64 fp_i_high = fingerprints_high[i];
-        
-        // Vectorize comparison against all other fingerprints
-        for (uniform int j = 0; j < count; j++) {
-            if (i == j) {
-                similarity_matrix[i * count + j] = 1.0f; // Self-similarity
-                continue;
+    // Optimized matrix computation with reduced scatter operations
+    // Process matrix in tiles to improve cache locality and reduce scatter overhead
+    uniform int tile_size = 8;  // Fixed tile size for optimal cache usage
+    
+    for (uniform int i_tile = 0; i_tile < count; i_tile += tile_size) {
+        for (uniform int j_tile = 0; j_tile < count; j_tile += tile_size) {
+            // Process tile with uniform operations to avoid varying/uniform conflicts
+            for (uniform int local_i = 0; local_i < tile_size; local_i++) {
+                uniform int i = i_tile + local_i;
+                if (i >= count) continue;
+                
+                uniform uint64 fp_i_low = fingerprints_low[i];
+                uniform uint64 fp_i_high = fingerprints_high[i];
+                
+                for (uniform int local_j = 0; local_j < tile_size; local_j++) {
+                    uniform int j = j_tile + local_j;
+                    if (j >= count) continue;
+                    
+                    uniform float similarity;
+                    if (i == j) {
+                        similarity = 1.0f; // Self-similarity
+                    } else {
+                        // Load comparison fingerprint
+                        uniform uint64 fp_j_low = fingerprints_low[j];
+                        uniform uint64 fp_j_high = fingerprints_high[j];
+                        
+                        // Compute similarity
+                        uniform uint64 diff_low = fp_i_low ^ fp_j_low;
+                        uniform uint64 diff_high = fp_i_high ^ fp_j_high;
+                        uniform int hamming_distance = popcnt(diff_low) + popcnt(diff_high);
+                        similarity = 1.0f - ((float)hamming_distance / 128.0f);
+                    }
+                    
+                    // Direct write to matrix
+                    similarity_matrix[i * count + j] = similarity;
+                }
             }
-            
-            // Load comparison fingerprint (vectorized access)
-            uniform uint64 fp_j_low = fingerprints_low[j];
-            uniform uint64 fp_j_high = fingerprints_high[j];
-            
-            // Compute similarity
-            uint64 diff_low = fp_i_low ^ fp_j_low;
-            uint64 diff_high = fp_i_high ^ fp_j_high;
-            int hamming_distance = popcnt(diff_low) + popcnt(diff_high);
-            float similarity = 1.0f - ((float)hamming_distance / 128.0f);
-            
-            similarity_matrix[i * count + j] = similarity;
         }
     }
 }

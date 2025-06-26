@@ -244,7 +244,7 @@ fn benchmarkPcallOverhead(allocator: std.mem.Allocator, config: BenchmarkConfig)
     // Measure pcall
     var pcall_sum: i64 = 0;
     for (0..config.iterations) |_| {
-        var future = zigpulse.pcall(i32, compute);
+        var future = zigpulse.pcall.pcall(i32, compute);
         pcall_sum += try future.get();
     }
     const pcall_time = timer.lap();
@@ -252,7 +252,7 @@ fn benchmarkPcallOverhead(allocator: std.mem.Allocator, config: BenchmarkConfig)
     // Measure pcallMinimal
     var minimal_sum: i64 = 0;
     for (0..config.iterations) |_| {
-        minimal_sum += zigpulse.pcallMinimal(i32, compute);
+        minimal_sum += zigpulse.pcall.pcallMinimal(i32, compute);
     }
     const minimal_time = timer.elapsed();
     
@@ -310,7 +310,7 @@ fn benchmarkForkJoin(allocator: std.mem.Allocator, config: BenchmarkConfig) !voi
     
     // Warmup
     for (0..config.warmup_iterations) |_| {
-        const result = try zigpulse.join2(pool, i32, i32, computeA, computeB);
+        const result = try zigpulse.pcall.join2(pool, i32, i32, computeA, computeB);
         std.mem.doNotOptimizeAway(result);
     }
     
@@ -319,7 +319,7 @@ fn benchmarkForkJoin(allocator: std.mem.Allocator, config: BenchmarkConfig) !voi
     var total: i64 = 0;
     
     for (0..config.iterations) |_| {
-        const result = try zigpulse.join2(pool, i32, i32, computeA, computeB);
+        const result = try zigpulse.pcall.join2(pool, i32, i32, computeA, computeB);
         total += result.left + result.right;
     }
     

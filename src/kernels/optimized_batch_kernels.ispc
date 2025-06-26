@@ -122,9 +122,20 @@ export void ispc_prediction_mega_batch(
         float confidence = exp(-2.0f * normalized_error);
         confidence_scores[i] = confidence;
         
-        // 3. Multi-factor prediction scoring (use modulo directly in array access)
-        float load = worker_loads[i % worker_count];
-        float numa_dist = numa_distances[i % worker_count];
+        // 3. Multi-factor prediction scoring (optimized indexing)
+        // Use bit-based indexing when worker_count is power of 2, otherwise use uniform modulo
+        uniform bool worker_count_is_power_of_2 = (worker_count & (worker_count - 1)) == 0;
+        int worker_idx;
+        if (worker_count_is_power_of_2) {
+            worker_idx = i & (worker_count - 1);
+        } else {
+            // Extract to uniform to avoid varying modulo performance penalty
+            uniform int uniform_i = extract(i, 0);
+            worker_idx = uniform_i % worker_count;
+        }
+        
+        float load = worker_loads[worker_idx];
+        float numa_dist = numa_distances[worker_idx];
         
         float time_score = 1.0f / (1.0f + filtered * 0.001f);
         float confidence_score = confidence;
@@ -152,22 +163,38 @@ export void ispc_similarity_matrix_mega_optimized(
             uniform int end_i = min(tile_i + tile_size, count);
             uniform int end_j = min(tile_j + tile_size, count);
             
-            // Process tile with SPMD parallelism
+            // Process tile with SPMD parallelism and reduced scatter operations
             foreach (i = tile_i ... end_i) {
                 uint64 fp_i_low = fingerprints_low[i];
                 uint64 fp_i_high = fingerprints_high[i];
                 
-                for (uniform int j = tile_j; j < end_j; j++) {
-                    if (i == j) {
-                        similarity_matrix[i * count + j] = 1.0f;
-                        continue;
+                // Use temporary array to batch matrix writes
+                float row_results[16];  // Process up to 16 elements at once
+                uniform int batch_size = min(end_j - tile_j, 16);
+                
+                for (uniform int j_batch = tile_j; j_batch < end_j; j_batch += batch_size) {
+                    uniform int batch_end = min(j_batch + batch_size, end_j);
+                    
+                    // Compute similarities for this batch
+                    for (uniform int local_j = 0; local_j < batch_end - j_batch; local_j++) {
+                        uniform int j = j_batch + local_j;
+                        
+                        if (i == j) {
+                            row_results[local_j] = 1.0f;
+                        } else {
+                            uniform uint64 fp_j_low = fingerprints_low[j];
+                            uniform uint64 fp_j_high = fingerprints_high[j];
+                            
+                            float similarity = compute_fingerprint_similarity_inline(fp_i_low, fp_i_high, fp_j_low, fp_j_high);
+                            row_results[local_j] = similarity;
+                        }
                     }
                     
-                    uniform uint64 fp_j_low = fingerprints_low[j];
-                    uniform uint64 fp_j_high = fingerprints_high[j];
-                    
-                    float similarity = compute_fingerprint_similarity_inline(fp_i_low, fp_i_high, fp_j_low, fp_j_high);
-                    similarity_matrix[i * count + j] = similarity;
+                    // Batch write to reduce scatter overhead
+                    for (uniform int local_j = 0; local_j < batch_end - j_batch; local_j++) {
+                        uniform int j = j_batch + local_j;
+                        similarity_matrix[i * count + j] = row_results[local_j];
+                    }
                 }
             }
         }

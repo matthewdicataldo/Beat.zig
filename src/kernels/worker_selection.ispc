@@ -57,12 +57,13 @@ export void ispc_topology_aware_selection(
             numa_score = 1.0f / (1.0f + (float)numa_distance * 0.5f);
         }
         
-        // CPU core locality (simplified model)
+        // CPU core locality (simplified model) - optimized bit testing
         float core_score = 1.0f;
         int core_id = cpu_cores[worker_id];
         if (core_id >= 0) {
             // Prefer even-numbered cores for hyperthreading efficiency
-            if ((core_id % 2) == 0) {
+            // Use bit testing instead of modulo for better vectorization
+            if ((core_id & 1) == 0) {
                 core_score = 1.1f;
             }
         }

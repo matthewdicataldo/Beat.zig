@@ -54,12 +54,16 @@ export void ispc_compute_multi_factor_confidence_batch(
             0.25f
         );
         
-        // Write results
-        confidence_results[i].sample_size_confidence = sample_confidence;
-        confidence_results[i].accuracy_confidence = accuracy_confidence;
-        confidence_results[i].temporal_confidence = temporal_confidence;
-        confidence_results[i].variance_confidence = variance_confidence;
-        confidence_results[i].overall_confidence = overall;
+        // Write results with reduced scatter operations
+        // Cache struct components to minimize memory traffic
+        MultiFactorConfidence result;
+        result.sample_size_confidence = sample_confidence;
+        result.accuracy_confidence = accuracy_confidence;
+        result.temporal_confidence = temporal_confidence;
+        result.variance_confidence = variance_confidence;
+        result.overall_confidence = overall;
+        
+        confidence_results[i] = result;  // Single struct write instead of 5 separate writes
     }
 }
 
@@ -191,13 +195,27 @@ export void ispc_lookup_predictions_batch(
     uniform int count,
     uniform int cache_size
 ) {
+    // Optimize cache indexing - use bit masking for power-of-2 cache sizes
+    uniform bool is_power_of_2 = (cache_size & (cache_size - 1)) == 0;
+    uniform uint32 cache_mask = cache_size - 1;
+    
     foreach (i = 0 ... count) {
         uint64 hash = fingerprint_hashes[i];
-        uint32 cache_idx = (uint32)(hash % (uint64)cache_size);
+        
+        // Use bit masking for power-of-2 sizes, fallback to modulo for others
+        uint32 cache_idx = (uint32)(hash & (uint64)cache_mask);
+        if (!is_power_of_2) {
+            // Use uniform modulo to avoid SIMD performance penalty
+            uniform uint32 uniform_hash = extract(hash, 0);
+            cache_idx = uniform_hash % cache_size;
+        }
         
         bool hit = cache_hits[cache_idx];
-        float prediction = hit ? cached_predictions[cache_idx] : 1000.0f; // Default prediction
-        float confidence = hit ? confidence_scores[cache_idx] : 0.1f; // Low confidence for cache miss
+        // Use ISPC select() for better vectorization
+        float cached_pred = cached_predictions[cache_idx];
+        float cached_conf = confidence_scores[cache_idx];
+        float prediction = select(hit, cached_pred, 1000.0f);
+        float confidence = select(hit, cached_conf, 0.1f);
         
         prediction_results[i] = prediction;
         result_confidences[i] = confidence;
@@ -272,11 +290,14 @@ export void ispc_estimate_work_batch(
         // Promotion decision based on estimated work
         bool should_promote = estimated_cycles > promotion_threshold && confidence > 0.5f;
         
-        // Write results
-        work_estimates[i].estimated_cycles = estimated_cycles;
-        work_estimates[i].confidence = confidence;
-        work_estimates[i].expected_duration_ns = expected_duration;
-        work_estimates[i].should_promote = should_promote;
+        // Write results with reduced scatter operations
+        PredictiveWorkEstimate estimate;
+        estimate.estimated_cycles = estimated_cycles;
+        estimate.confidence = confidence;
+        estimate.expected_duration_ns = expected_duration;
+        estimate.should_promote = should_promote;
+        
+        work_estimates[i] = estimate;  // Single struct write instead of 4 separate writes
     }
 }
 
@@ -335,10 +356,14 @@ export void ispc_make_scheduling_decisions_batch(
         bool use_work_stealing = best_load > load_balance_threshold || task_confidence < 0.3f;
         
         // Write results
-        scheduling_decisions[task_id].selected_worker = best_worker;
-        scheduling_decisions[task_id].decision_confidence = decision_confidence;
-        scheduling_decisions[task_id].expected_completion_time = completion_time;
-        scheduling_decisions[task_id].use_work_stealing = use_work_stealing;
+        // Write scheduling decision with reduced scatter operations
+        SchedulingDecision decision;
+        decision.selected_worker = best_worker;
+        decision.decision_confidence = decision_confidence;
+        decision.expected_completion_time = completion_time;
+        decision.use_work_stealing = use_work_stealing;
+        
+        scheduling_decisions[task_id] = decision;  // Single struct write instead of 4 separate writes
     }
 }
 

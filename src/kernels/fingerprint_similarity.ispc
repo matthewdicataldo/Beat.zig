@@ -32,6 +32,7 @@ export void ispc_compute_fingerprint_similarity(
     }
 }
 
+
 // Compute similarity matrix for batch formation optimization
 export void ispc_compute_similarity_matrix(
     uniform uint64 fingerprints[],

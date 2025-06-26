@@ -73,30 +73,38 @@ pub fn PotentialFuture(comptime T: type) type {
 pub fn pcallBasic(comptime T: type, func: *const fn () T) PotentialFuture(T) {
     const pool = tls_pool orelse return .{ .immediate = func() };
     
-    // Always try to parallelize
-    const future = pool.allocator.create(Future(T)) catch {
+    // Create wrapper struct to hold both future and function
+    const TaskData = struct {
+        future: Future(T),
+        func: *const fn () T,
+    };
+    
+    const task_data = pool.allocator.create(TaskData) catch {
         return .{ .immediate = func() };
     };
     
-    future.* = Future(T){};
+    task_data.* = TaskData{
+        .future = Future(T){},
+        .func = func,
+    };
     
     const task = core.Task{
         .func = struct {
             fn wrapper(data: *anyopaque) void {
-                const fut = @as(*Future(T), @ptrCast(@alignCast(data)));
-                fut.result = func();
-                fut.completed.store(true, .release);
+                const task_ptr = @as(*TaskData, @ptrCast(@alignCast(data)));
+                task_ptr.future.result = task_ptr.func();
+                task_ptr.future.completed.store(true, .release);
             }
         }.wrapper,
-        .data = future,
+        .data = task_data,
     };
     
     pool.submit(task) catch {
-        pool.allocator.destroy(future);
+        pool.allocator.destroy(task_data);
         return .{ .immediate = func() };
     };
     
-    return .{ .deferred = future };
+    return .{ .deferred = &task_data.future };
 }
 
 // ============================================================================
@@ -191,33 +199,53 @@ pub fn join2(
     func1: *const fn () anyerror!T1,
     func2: *const fn () anyerror!T2,
 ) !struct { left: T1, right: T2 } {
-    // Execute first function in parallel
-    const future1 = try pool.allocator.create(Future(T1));
-    future1.* = Future(T1){};
+    // Create wrapper struct to hold both future and function
+    const TaskData = struct {
+        future: Future(T1),
+        func: *const fn () anyerror!T1,
+    };
+    
+    const task_data = pool.allocator.create(TaskData) catch {
+        // If allocation fails, run both sequentially
+        const result1 = try func1();
+        const result2 = try func2();
+        return .{ .left = result1, .right = result2 };
+    };
+    
+    task_data.* = TaskData{
+        .future = Future(T1){},
+        .func = func1,
+    };
     
     const task = core.Task{
         .func = struct {
             fn wrapper(data: *anyopaque) void {
-                const fut = @as(*Future(T1), @ptrCast(@alignCast(data)));
-                fut.result = func1() catch |err| {
-                    fut.error_value = err;
-                    fut.completed.store(true, .release);
+                const task_ptr = @as(*TaskData, @ptrCast(@alignCast(data)));
+                task_ptr.future.result = task_ptr.func() catch |err| {
+                    task_ptr.future.error_value = err;
+                    task_ptr.future.completed.store(true, .release);
                     return;
                 };
-                fut.completed.store(true, .release);
+                task_ptr.future.completed.store(true, .release);
             }
         }.wrapper,
-        .data = future1,
+        .data = task_data,
     };
     
-    try pool.submit(task);
+    pool.submit(task) catch {
+        // If submit fails, run both sequentially
+        pool.allocator.destroy(task_data);
+        const result1 = try func1();
+        const result2 = try func2();
+        return .{ .left = result1, .right = result2 };
+    };
     
     // Execute second function on current thread
     const result2 = try func2();
     
     // Wait for first result
-    const result1 = try future1.wait();
-    pool.allocator.destroy(future1);
+    const result1 = try task_data.future.wait();
+    pool.allocator.destroy(task_data);
     
     return .{ .left = result1, .right = result2 };
 }
