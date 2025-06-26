@@ -21,7 +21,7 @@ const BenchmarkConfig = struct {
 
 fn Timer() type {
     return struct {
-        start_time: i64,
+        start_time: i128,
         
         const Self = @This();
         
@@ -52,22 +52,28 @@ fn benchmarkTaskSubmission(allocator: std.mem.Allocator, config: BenchmarkConfig
     const pool = try zigpulse.createPool(allocator);
     defer pool.deinit();
     
-    const noop_task = struct {
+    const noop_task_func = struct {
         fn run(data: *anyopaque) void {
             _ = data;
         }
     }.run;
     
+    var dummy_data: u8 = 0;
+    const noop_task = zigpulse.Task{
+        .func = noop_task_func,
+        .data = &dummy_data,
+    };
+    
     // Warmup
     for (0..config.warmup_iterations) |_| {
-        try pool.submit(noop_task, undefined);
+        try pool.submit(noop_task);
     }
     pool.wait();
     
     // Measure
     var timer = Timer().start();
     for (0..config.num_tasks) |_| {
-        try pool.submit(noop_task, undefined);
+        try pool.submit(noop_task);
     }
     const submit_time = timer.elapsed();
     
@@ -126,8 +132,13 @@ fn benchmarkVsStdThread(allocator: std.mem.Allocator, config: BenchmarkConfig) !
     
     counter.store(0, .release);
     
+    const increment_task = zigpulse.Task{
+        .func = increment,
+        .data = &counter,
+    };
+    
     for (0..config.num_tasks) |_| {
-        try pool.submit(increment, &counter);
+        try pool.submit(increment_task);
     }
     
     pool.wait();
@@ -175,16 +186,20 @@ fn benchmarkWorkStealing(allocator: std.mem.Allocator, config: BenchmarkConfig) 
     var iterations: u32 = 1000;
     var timer = Timer().start();
     
+    const task = zigpulse.Task{
+        .func = work_task,
+        .data = @as(*anyopaque, @ptrCast(&iterations)),
+    };
+    
     // Submit all tasks to worker 0 to force stealing
     for (0..config.num_tasks) |_| {
-        try pool.submit(work_task, @as(*anyopaque, @ptrCast(&iterations)));
+        try pool.submit(task);
     }
     
     pool.wait();
     const elapsed = timer.elapsed();
     
-    const stats = pool.getStats();
-    const steals = stats.tasks_stolen.load(.acquire);
+    const steals = pool.stats.cold.tasks_stolen.load(.acquire);
     const steal_rate = @as(f64, @floatFromInt(steals)) / @as(f64, @floatFromInt(config.num_tasks)) * 100.0;
     
     std.debug.print("  Tasks: {}, Stolen: {} ({d:.1}%)\n", .{ config.num_tasks, steals, steal_rate });
@@ -203,11 +218,9 @@ fn benchmarkPcallOverhead(allocator: std.mem.Allocator, config: BenchmarkConfig)
     
     const pool = try zigpulse.createPoolWithConfig(allocator, .{
         .enable_heartbeat = true,
-        .use_fast_rdtsc = true,
     });
     defer pool.deinit();
     
-    zigpulse.initThread(pool);
     
     // Baseline: direct function call
     const compute = struct {
@@ -399,8 +412,13 @@ fn benchmarkScaling(allocator: std.mem.Allocator, config: BenchmarkConfig) !void
         
         var timer = Timer().start();
         
+        const task = zigpulse.Task{
+            .func = work_task,
+            .data = @as(*anyopaque, @ptrCast(&iterations)),
+        };
+        
         for (0..config.num_tasks) |_| {
-            try pool.submit(work_task, @as(*anyopaque, @ptrCast(&iterations)));
+            try pool.submit(task);
         }
         
         pool.wait();

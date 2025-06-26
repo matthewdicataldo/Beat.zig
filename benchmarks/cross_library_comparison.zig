@@ -60,14 +60,14 @@ pub const StatisticalResult = struct {
         std.debug.print("    Mean: {d:.2} μs (±{d:.2})\n", .{ self.mean / 1000.0, self.std_dev / 1000.0 });
         std.debug.print("    Median: {d:.2} μs\n", .{ self.median / 1000.0 });
         std.debug.print("    Range: {d:.2} - {d:.2} μs\n", .{ self.min / 1000.0, self.max / 1000.0 });
-        std.debug.print("    CV: {d:.1}% ({})\n", .{ self.coefficient_of_variation, 
+        std.debug.print("    CV: {d:.1}% ({s})\n", .{ self.coefficient_of_variation, 
             if (self.isStable()) "STABLE" else "UNSTABLE" });
         std.debug.print("    95% CI: [{d:.2}, {d:.2}] μs\n", .{ 
             self.confidence_interval_95.lower / 1000.0, 
             self.confidence_interval_95.upper / 1000.0 
         });
         if (self.outliers_count > 0) {
-            std.debug.print("    Outliers: {} samples\n", .{self.outliers_count});
+            std.debug.print("    Outliers: {d} samples\n", .{self.outliers_count});
         }
     }
 };
@@ -139,7 +139,7 @@ pub const PrecisionTimer = struct {
         // Sort for median and outlier detection
         const sorted = try self.allocator.dupe(u64, measurements);
         defer self.allocator.free(sorted);
-        std.sort.heap(u64, sorted, {}, std.sort.asc(u64));
+        std.mem.sort(u64, sorted, {}, std.sort.asc(u64));
         
         // Basic statistics
         var sum: u64 = 0;
@@ -437,7 +437,7 @@ pub const ParallelReduceBenchmark = struct {
     
     /// Beat.zig parallel reduce
     pub fn beatParallelReduce(self: *ParallelReduceBenchmark, pool: *beat.ThreadPool, array: []const f64) !f64 {
-        const chunk_size = @max(1, self.array_size / (pool.worker_count * 4));
+        const chunk_size = @max(1, self.array_size / (pool.workers.len * 4));
         const num_chunks = (self.array_size + chunk_size - 1) / chunk_size;
         
         const ChunkTask = struct {
@@ -516,12 +516,12 @@ pub const BenchmarkConfig = struct {
         }
         
         std.debug.print("📊 Benchmark Configuration:\n", .{});
-        std.debug.print("   Warmup iterations: {}\n", .{self.warmup_iterations});
-        std.debug.print("   Measurement iterations: {}\n", .{self.measurement_iterations});
+        std.debug.print("   Warmup iterations: {d}\n", .{self.warmup_iterations});
+        std.debug.print("   Measurement iterations: {d}\n", .{self.measurement_iterations});
         std.debug.print("   Stability threshold: {d:.1}% CV\n", .{self.stability_threshold_cv});
-        std.debug.print("   Max measurement rounds: {}\n", .{self.max_measurement_rounds});
-        std.debug.print("   CPU affinity: {}\n", .{self.cpu_affinity_enabled});
-        std.debug.print("   Process priority boost: {}\n", .{self.process_priority_boost});
+        std.debug.print("   Max measurement rounds: {d}\n", .{self.max_measurement_rounds});
+        std.debug.print("   CPU affinity: {any}\n", .{self.cpu_affinity_enabled});
+        std.debug.print("   Process priority boost: {any}\n", .{self.process_priority_boost});
     }
 };
 
@@ -563,7 +563,7 @@ pub const ComparisonResult = struct {
             });
         }
         
-        std.debug.print("   📊 Statistical significance: {}\n", .{self.statistical_significance});
+        std.debug.print("   📊 Statistical significance: {any}\n", .{self.statistical_significance});
         
         // Performance categorization
         if (self.speedup_factor >= 2.0 and self.statistical_significance == .highly_significant) {
@@ -624,7 +624,7 @@ pub const CrossLibraryBenchmarkSuite = struct {
         const test_sizes = [_]usize{ 1023, 16_777_215, 67_108_863 };
         
         for (test_sizes) |tree_size| {
-            std.debug.print("\n📏 Tree size: {} nodes\n", .{tree_size});
+            std.debug.print("\n📏 Tree size: {d} nodes\n", .{tree_size});
             
             var benchmark = BinaryTreeSumBenchmark.init(self.allocator, tree_size);
             const tree = try benchmark.createTree();
@@ -637,7 +637,7 @@ pub const CrossLibraryBenchmarkSuite = struct {
             const pool = try beat.ThreadPool.init(self.allocator, .{});
             defer pool.deinit();
             
-            const beat_stats = try self.measureBeatTreeSum(&benchmark, &pool, tree);
+            const beat_stats = try self.measureBeatTreeSum(&benchmark, pool, tree);
             
             // Compare results
             const comparison = ComparisonResult{
@@ -700,7 +700,7 @@ pub const CrossLibraryBenchmarkSuite = struct {
         const test_sizes = [_]usize{ 64, 128, 256, 512 };
         
         for (test_sizes) |matrix_size| {
-            std.debug.print("\n📏 Matrix size: {}x{}\n", .{ matrix_size, matrix_size });
+            std.debug.print("\n📏 Matrix size: {d}x{d}\n", .{ matrix_size, matrix_size });
             
             var benchmark = MatrixMultiplicationBenchmark.init(self.allocator, matrix_size);
             
@@ -720,7 +720,7 @@ pub const CrossLibraryBenchmarkSuite = struct {
             const pool = try beat.ThreadPool.init(self.allocator, .{});
             defer pool.deinit();
             
-            const beat_stats = try self.measureBeatMatrixMult(&benchmark, &pool, matrix_a, matrix_b, matrix_c_par);
+            const beat_stats = try self.measureBeatMatrixMult(&benchmark, pool, matrix_a, matrix_b, matrix_c_par);
             
             // Compare results
             const comparison = ComparisonResult{
@@ -779,7 +779,7 @@ pub const CrossLibraryBenchmarkSuite = struct {
         const test_sizes = [_]usize{ 100_000, 1_000_000, 10_000_000 };
         
         for (test_sizes) |array_size| {
-            std.debug.print("\n📏 Array size: {} elements\n", .{array_size});
+            std.debug.print("\n📏 Array size: {d} elements\n", .{array_size});
             
             var benchmark = ParallelReduceBenchmark.init(self.allocator, array_size);
             
@@ -793,7 +793,7 @@ pub const CrossLibraryBenchmarkSuite = struct {
             const pool = try beat.ThreadPool.init(self.allocator, .{});
             defer pool.deinit();
             
-            const beat_stats = try self.measureBeatReduce(&benchmark, &pool, array);
+            const beat_stats = try self.measureBeatReduce(&benchmark, pool, array);
             
             // Compare results
             const comparison = ComparisonResult{

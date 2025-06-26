@@ -93,6 +93,16 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("beat.zig"),
     }));
 
+    // Add ISPC stub cleanup to provide missing cleanup functions
+    const ispc_stub_obj = b.addObject(.{
+        .name = "ispc_stub_cleanup",
+        .root_source_file = b.path("src/ispc_stub_cleanup.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    cross_library_benchmark.addObject(ispc_stub_obj);
+
+    // Note: ISPC linking will be added later after ISPC objects are compiled
     b.installArtifact(cross_library_benchmark);
 
     const run_cross_library_benchmark = b.addRunArtifact(cross_library_benchmark);
@@ -201,7 +211,7 @@ pub fn build(b: *std.Build) void {
 
     // Bundle file tests
     const bundle_test = b.addTest(.{
-        .root_source_file = b.path("zigpulse.zig"),
+        .root_source_file = b.path("beat.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -1253,6 +1263,17 @@ pub fn build(b: *std.Build) void {
     const ispc_all_step = b.step("ispc-all", "Compile all ISPC kernels for SPMD acceleration");
     for (ispc_steps.items) |ispc_step| {
         ispc_all_step.dependOn(ispc_step);
+    }
+
+    // Link ISPC objects to cross-library benchmark (needed for ISPC cleanup in ThreadPool.deinit)
+    if (ispc_available) {
+        for (ispc_obj_paths.items) |obj_path| {
+            cross_library_benchmark.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        cross_library_benchmark.addIncludePath(b.path("zig-cache/ispc"));
+        for (ispc_steps.items) |ispc_step| {
+            cross_library_benchmark.step.dependOn(ispc_step);
+        }
     }
 
     // Minotaur SIMD superoptimization tests

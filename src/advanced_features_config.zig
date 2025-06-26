@@ -436,7 +436,7 @@ pub const AdvancedFeaturesConfig = struct {
         }
         
         // SIMD feature optimization
-        if (!build_opts.hardware.has_avx and !build_opts.hardware.has_sse and !build_opts.hardware.has_neon) {
+        if (!build_opts.cpu_features.has_avx and !build_opts.cpu_features.has_sse and !build_opts.cpu_features.has_neon) {
             self.enable_simd_classification = false; // No SIMD support available
         }
         

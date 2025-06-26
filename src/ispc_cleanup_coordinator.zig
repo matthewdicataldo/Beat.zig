@@ -3,7 +3,10 @@
 
 const std = @import("std");
 
-// ISPC extern function declarations
+// ISPC extern function declarations - these may not be available in all build configurations
+// In production applications with full ISPC runtime, these provide comprehensive cleanup
+// In minimal configurations (like cross-library benchmarks), these gracefully no-op
+
 extern fn ispc_free_prediction_caches() void;
 extern fn ispc_free_one_euro_filter_pools() void;
 extern fn ispc_free_multi_factor_confidence_state() void;

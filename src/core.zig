@@ -59,7 +59,7 @@ pub const Config = struct {
     
     // V1 features
     enable_work_stealing: bool = true,       // Work-stealing between threads
-    enable_adaptive_sizing: bool = advanced_features.global_config.enable_development_mode,    // Dynamic worker count
+    enable_adaptive_sizing: bool = false,    // Dynamic worker count
     
     // V2 features (heartbeat scheduling)
     enable_heartbeat: bool = true,           // Heartbeat scheduling
@@ -68,10 +68,10 @@ pub const Config = struct {
     min_work_cycles: u64 = 1000,            // Min cycles for promotion
     
     // V3 features - ENABLED BY DEFAULT with automatic fallback
-    enable_topology_aware: bool = advanced_features.global_config.enable_topology_awareness,
-    enable_numa_aware: bool = advanced_features.global_config.enable_numa_awareness,
+    enable_topology_aware: bool = true,
+    enable_numa_aware: bool = true,
     enable_lock_free: bool = true,          // Lock-free data structures
-    enable_predictive: bool = advanced_features.global_config.enable_predictive_scheduling,
+    enable_predictive: bool = true,
     
     // One Euro Filter parameters for task execution prediction
     // Auto-tuned based on hardware characteristics, but can be overridden
@@ -88,34 +88,34 @@ pub const Config = struct {
     enable_trace: bool = false,
     
     // Advanced worker selection - ENABLED BY DEFAULT with fallback
-    enable_advanced_selection: bool = advanced_features.global_config.enable_advanced_worker_selection,
+    enable_advanced_selection: bool = true,
     selection_criteria: ?advanced_worker_selection.SelectionCriteria = null,  // null = auto-detect optimal
-    enable_selection_learning: bool = advanced_features.global_config.enable_advanced_worker_selection,
+    enable_selection_learning: bool = true,
     
     // SIMD and ISPC acceleration - ENABLED BY DEFAULT with fallback
-    enable_ispc_acceleration: bool = advanced_features.global_config.enable_ispc_acceleration,
-    enable_simd_classification: bool = advanced_features.global_config.enable_simd_classification,
-    enable_triple_optimization: bool = advanced_features.global_config.enable_triple_optimization,
+    enable_ispc_acceleration: bool = true,
+    enable_simd_classification: bool = true,
+    enable_triple_optimization: bool = false,
     
     // Monitoring and observability - ENABLED BY DEFAULT with fallback
-    enable_memory_pressure_monitoring: bool = advanced_features.global_config.enable_memory_pressure_monitoring,
-    enable_opentelemetry: bool = advanced_features.global_config.enable_opentelemetry,
-    enable_advanced_error_reporting: bool = advanced_features.global_config.enable_advanced_error_reporting,
-    enable_background_profiling: bool = advanced_features.global_config.enable_background_profiling,
+    enable_memory_pressure_monitoring: bool = true,
+    enable_opentelemetry: bool = false,
+    enable_advanced_error_reporting: bool = true,
+    enable_background_profiling: bool = false,
     
     // Development mode configuration - AUTO-ENABLED in debug builds
-    development_mode: bool = advanced_features.global_config.enable_development_mode,
-    verbose_logging: bool = advanced_features.global_config.enable_verbose_logging,
-    performance_validation: bool = advanced_features.global_config.enable_development_mode,
-    memory_debugging: bool = advanced_features.global_config.enable_memory_debugging,
-    task_tracing: bool = advanced_features.global_config.enable_task_tracing,
-    scheduler_profiling: bool = advanced_features.global_config.enable_scheduler_profiling,
+    development_mode: bool = false,
+    verbose_logging: bool = false,
+    performance_validation: bool = false,
+    memory_debugging: bool = false,
+    task_tracing: bool = false,
+    scheduler_profiling: bool = false,
     
     // Mathematical optimizations - ENABLED BY DEFAULT with fallback
-    enable_souper_optimizations: ?bool = if (advanced_features.global_config.enable_souper_optimizations) true else null,
-    enable_minotaur_optimizations: bool = advanced_features.global_config.enable_minotaur_optimizations,
-    deadlock_detection: bool = advanced_features.global_config.enable_deadlock_detection,
-    resource_leak_detection: bool = advanced_features.global_config.enable_resource_leak_detection,
+    enable_souper_optimizations: ?bool = null,
+    enable_minotaur_optimizations: bool = false,
+    deadlock_detection: bool = false,
+    resource_leak_detection: bool = false,
     
     /// Create a development configuration with comprehensive debugging enabled
     pub fn createDevelopmentConfig() Config {
