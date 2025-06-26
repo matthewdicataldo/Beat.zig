@@ -264,8 +264,8 @@ pub const EnhancedSimilarity = struct {
 /// API Enhancement Helper - automatically chooses best implementation
 pub const AutoAcceleration = struct {
     /// Initialize acceleration system (call once at startup)
-    pub fn init() void {
-        ispc_integration.initGlobalAccelerator(ispc_integration.PredictionAccelerator.AcceleratorConfig{
+    pub fn init(allocator: std.mem.Allocator) void {
+        ispc_integration.initGlobalAccelerator(allocator, ispc_integration.PredictionAccelerator.AcceleratorConfig{
             .enable_ispc = true,
             .auto_detection = true,
             .performance_tracking = builtin.mode != .ReleaseFast, // Track in debug/release-safe

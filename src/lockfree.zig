@@ -378,7 +378,7 @@ pub fn MpmcQueue(comptime T: type, comptime capacity: usize) type {
                     // Cell has data
                     if (self.dequeue_pos.cmpxchgWeak(pos, pos + 1, .monotonic, .monotonic)) |new_pos| {
                         pos = new_pos;
-                        std.Thread.yield(); // Yield on CAS contention
+                        std.Thread.yield() catch {}; // Yield on CAS contention
                         continue;
                     }
                     
@@ -391,7 +391,7 @@ pub fn MpmcQueue(comptime T: type, comptime capacity: usize) type {
                     return null;
                 } else {
                     // Another thread is ahead - yield to allow forward progress on hyper-threads
-                    std.Thread.yield();
+                    std.Thread.yield() catch {};
                     pos = self.dequeue_pos.load(.monotonic);
                 }
             }

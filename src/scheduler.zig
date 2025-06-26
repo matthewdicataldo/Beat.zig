@@ -318,7 +318,7 @@ pub const Scheduler = struct {
         const last_check = self.last_activity_check.load(.monotonic);
         
         // Calculate promotion rate (promotions per second)
-        const time_delta_ns = current_time - last_check;
+        const time_delta_ns = if (current_time >= last_check) current_time - last_check else 0;
         const promotion_delta = current_promotions - previous_promotions;
         
         if (time_delta_ns < 100_000_000) { // Less than 100ms since last check

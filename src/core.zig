@@ -561,7 +561,7 @@ pub const ThreadPool = struct {
         pub fn maybeReset(self: *StealBackOff) void {
             if (self.last_success_time > 0) {
                 const current_time = @as(u64, @intCast(std.time.nanoTimestamp()));
-                if (current_time - self.last_success_time > SUCCESS_RESET_THRESHOLD) {
+                if (current_time >= self.last_success_time and current_time - self.last_success_time > SUCCESS_RESET_THRESHOLD) {
                     self.consecutive_failures = @max(1, self.consecutive_failures / 2); // Gradual reset
                 }
             }
@@ -984,7 +984,7 @@ pub const ThreadPool = struct {
         
         // Initialize ISPC acceleration for transparent performance enhancement
         // This provides maximum out-of-the-box performance with zero API changes
-        fingerprint_enhanced.AutoAcceleration.init();
+        fingerprint_enhanced.AutoAcceleration.init(allocator);
         
         // Initialize ISPC cleanup coordinator to prevent memory leaks
         ispc_cleanup.initGlobalCleanupCoordinator(allocator);
