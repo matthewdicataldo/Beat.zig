@@ -1,3 +1,5 @@
+NOTE: Deep Research report by Gemini 2.5 Pro
+
 # **A Comprehensive Guide to Superoptimization of Zig Code with Souper and Minotaur**
 
 ## **Introduction**

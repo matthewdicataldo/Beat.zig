@@ -1,6 +1,6 @@
 # Beat.zig v3.1
 
-Ultra-optimized parallelism library for Zig featuring CPU topology awareness, lock-free data structures, memory-aware scheduling, and SIMD task processing.
+Optimized parallelism library for Zig featuring CPU topology awareness, lock-free data structures, memory-aware scheduling, and SIMD task processing.
 
 ## Performance Comparison
 
@@ -26,7 +26,7 @@ Beat.zig was inspired by and benchmarked against leading parallelism libraries. 
 - **One Euro Filter prediction** superior to simple averaging
 - **Cross-platform SIMD support** (SSE → AVX-512, NEON, SVE)
 
-✅ **Scientific Rigor**
+✅ **Comparison Testing**
 ```bash
 # Run comprehensive multi-library comparison
 zig build bench-multilibrary-external

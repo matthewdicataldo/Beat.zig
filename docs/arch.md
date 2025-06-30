@@ -2,7 +2,7 @@
 
 ## Overview
 
-ZigPulse v3 is a high-performance parallelism library for Zig that combines traditional thread pool concepts with cutting-edge techniques from parallel computing research. The architecture prioritizes cache efficiency, minimal overhead, and hardware-aware scheduling.
+ beat.zig is a parallelism library for Zig that combines traditional thread pool concepts with cutting-edge techniques from parallel computing research. The architecture prioritizes cache efficiency, minimal overhead, and hardware-aware scheduling.
 
 ## System Architecture
 
@@ -13,7 +13,7 @@ ZigPulse v3 is a high-performance parallelism library for Zig that combines trad
 └────────────────────────────────────────────────────────────────┘
                                  │
 ┌────────────────────────────────────────────────────────────────┐
-│                         ZigPulse Core                          │
+│                         beat.zig Core                          │
 │  ┌─────────────┐  ┌───────────────┐  ┌────────────────────┐    │
 │  │  ThreadPool │  │   Scheduler   │  │  Memory Manager    │    │
 │  │             │  │               │  │                    │    │

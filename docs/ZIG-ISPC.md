@@ -1,3 +1,5 @@
+NOTE: Deep Research report by Gemini 2.5 Pro
+
 # **Native SPMD in a Modern Systems Language: A Report on Integrating ISPC and Zig**
 
 ## **Introduction: The Symbiosis of Explicit Parallelism and Systems Control**
