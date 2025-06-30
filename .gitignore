@@ -75,6 +75,7 @@ llvm-*.log
 /tmp/
 *.tmp
 *.temp
+temp_debug
 
 # Redis cache files (used by optimization frameworks)
 dump.rdb

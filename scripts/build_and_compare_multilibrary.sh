@@ -18,6 +18,17 @@ REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 TEMP_DIR="$REPO_ROOT/temp_multilibrary_comparison"
 RESULTS_FILE="$REPO_ROOT/multilibrary_comparison_results.txt"
 
+# =============================================================================
+# CONSOLIDATED BENCHMARK CONFIGURATION
+# =============================================================================
+# All benchmark parameters in one place for easy maintenance
+TREE_SIZE_SMALL=1023
+TREE_SIZE_LARGE=65535
+SAMPLE_COUNT=20
+WARMUP_RUNS=3
+BENCHMARK_DESCRIPTION="Tree Sizes: 1,023 and 65,535 nodes"
+METHODOLOGY_DESCRIPTION="Methodology: Median of ${SAMPLE_COUNT} runs with ${WARMUP_RUNS} warmup iterations"
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -128,7 +139,7 @@ echo -e "${BLUE}Creating Spice benchmark...${NC}"
 
 cat > spice_tree_benchmark.zig << 'EOF'
 const std = @import("std");
-const spice = @import("src/spice.zig");
+const spice = @import("src/root.zig");
 
 const Node = struct {
     value: i64,
@@ -170,45 +181,63 @@ fn sequentialSum(node: ?*Node) i64 {
     return n.value + sequentialSum(n.left) + sequentialSum(n.right);
 }
 
-fn spiceParallelSum(node: ?*Node) i64 {
-    if (node == null) return 0;
-    const n = node.?;
+fn spiceParallelSum(task: *spice.Task, node: *Node) i64 {
+    var result = node.value;
     
-    if (n.value > 100) {
-        const left_future = spice.spawn(spiceParallelSum, .{n.left});
-        const right_result = spiceParallelSum(n.right);
-        const left_result = spice.sync(left_future);
-        return n.value + left_result + right_result;
-    } else {
-        return sequentialSum(node);
+    if (node.left) |left_child| {
+        if (node.right) |right_child| {
+            // Use Spice's Future for fork-join parallelism
+            var fut = spice.Future(*Node, i64).init();
+            fut.fork(task, spiceParallelSum, right_child);
+            result += task.call(i64, spiceParallelSum, left_child);
+            
+            if (fut.join(task)) |val| {
+                result += val;
+            } else {
+                result += task.call(i64, spiceParallelSum, right_child);
+            }
+            return result;
+        }
+        result += task.call(i64, spiceParallelSum, left_child);
     }
+    
+    if (node.right) |right_child| {
+        result += task.call(i64, spiceParallelSum, right_child);
+    }
+    
+    return result;
 }
 
 pub fn main() !void {
     const allocator = std.heap.page_allocator;
     
-    const tree_sizes = [_]usize{ 1023, 16_777_215 };
+    const tree_sizes = [_]usize{ ${TREE_SIZE_SMALL}, ${TREE_SIZE_LARGE} };  // Standardized tree sizes
     
-    std.debug.print("SPICE BENCHMARK RESULTS\n");
-    std.debug.print("=======================\n");
+    std.debug.print("SPICE BENCHMARK RESULTS\n", .{});
+    std.debug.print("=======================\n", .{});
     std.debug.print("{s:<12} {s:<12} {s:<12} {s:<12} {s:<12}\n", .{
         "Tree Size", "Seq (μs)", "Par (μs)", "Speedup", "Overhead"
     });
-    std.debug.print("------------------------------------------------------------\n");
+    std.debug.print("------------------------------------------------------------\n", .{});
     
     for (tree_sizes) |size| {
         const tree = try createTree(allocator, size);
         defer destroyTree(allocator, tree);
         
+        // Create thread pool
+        var thread_pool = spice.ThreadPool.init(allocator);
+        thread_pool.start(.{});
+        defer thread_pool.deinit();
+        
         // Warmup
-        for (0..3) |_| {
+        for (0..${WARMUP_RUNS}) |_| {
             _ = sequentialSum(tree);
-            _ = spiceParallelSum(tree);
+            _ = thread_pool.call(i64, spiceParallelSum, tree);
         }
         
-        // Sequential timing (multiple runs)
-        var seq_times: [10]u64 = undefined;
-        for (seq_times, 0..) |*time, i| {
+        // Sequential timing (increased sample size for better statistics)
+        var seq_times: [${SAMPLE_COUNT}]u64 = undefined;
+        for (&seq_times, 0..) |*time, i| {
             _ = i;
             const start = std.time.nanoTimestamp();
             const result = sequentialSum(tree);
@@ -217,12 +246,12 @@ pub fn main() !void {
             std.mem.doNotOptimizeAway(result);
         }
         
-        // Parallel timing (multiple runs)
-        var par_times: [10]u64 = undefined;
-        for (par_times, 0..) |*time, i| {
+        // Parallel timing (increased sample size for better statistics)
+        var par_times: [${SAMPLE_COUNT}]u64 = undefined;
+        for (&par_times, 0..) |*time, i| {
             _ = i;
             const start = std.time.nanoTimestamp();
-            const result = spiceParallelSum(tree);
+            const result = thread_pool.call(i64, spiceParallelSum, tree);
             const end = std.time.nanoTimestamp();
             time.* = @intCast(end - start);
             std.mem.doNotOptimizeAway(result);
@@ -263,7 +292,7 @@ echo -e "${BLUE}Creating Chili benchmark...${NC}"
 cd "$TEMP_DIR/chili"
 
 cat > chili_tree_benchmark.rs << 'EOF'
-use chili::*;
+use chili;
 
 #[derive(Clone)]
 struct Node {
@@ -311,26 +340,29 @@ fn sequential_sum(node: &Option<Box<Node>>) -> i64 {
     }
 }
 
-fn chili_parallel_sum(node: &Option<Box<Node>>) -> i64 {
-    match node {
-        None => 0,
-        Some(n) => {
-            if n.value > 100 {
-                // Use Chili's parallel execution
-                let left_sum = || chili_parallel_sum(&n.left);
-                let right_sum = || chili_parallel_sum(&n.right);
-                
-                let (left_result, right_result) = join(left_sum, right_sum);
-                n.value + left_result + right_result
-            } else {
-                sequential_sum(node)
-            }
-        }
+// FIXED: Proper Chili parallel sum that actually uses fork-join correctly
+fn chili_parallel_sum(scope: &mut chili::Scope, node: &Node) -> i64 {
+    // Always try to parallelize if we have children (Chili's heartbeat system will decide)
+    if node.left.is_some() || node.right.is_some() {
+        let (left_result, right_result) = scope.join(
+            |s| node.left.as_deref().map(|n| chili_parallel_sum(s, n)).unwrap_or(0),
+            |s| node.right.as_deref().map(|n| chili_parallel_sum(s, n)).unwrap_or(0)
+        );
+        node.value + left_result + right_result
+    } else {
+        // Leaf node - just return the value
+        node.value
     }
 }
 
+fn sequential_node_sum(node: &Node) -> i64 {
+    let left_sum = node.left.as_deref().map(|n| sequential_node_sum(n)).unwrap_or(0);
+    let right_sum = node.right.as_deref().map(|n| sequential_node_sum(n)).unwrap_or(0);
+    node.value + left_sum + right_sum
+}
+
 fn main() {
-    let tree_sizes = vec![1023, 16_777_215];
+    let tree_sizes = vec![${TREE_SIZE_SMALL}, ${TREE_SIZE_LARGE}];  // Standardized tree sizes
     
     println!("CHILI BENCHMARK RESULTS");
     println!("=======================");
@@ -341,15 +373,20 @@ fn main() {
     for &size in &tree_sizes {
         let tree = create_tree(size);
         
-        // Warmup
-        for _ in 0..3 {
+        let thread_pool = chili::ThreadPool::new();
+        
+        // Warmup runs
+        for _ in 0..${WARMUP_RUNS} {
             let _ = sequential_sum(&tree);
-            let _ = chili_parallel_sum(&tree);
+            if let Some(ref tree_node) = tree {
+                let mut scope = thread_pool.scope();
+                let _ = chili_parallel_sum(&mut scope, tree_node);
+            }
         }
         
-        // Sequential timing (multiple runs)
-        let mut seq_times = vec![0u128; 10];
-        for i in 0..10 {
+        // Sequential timing (increased sample size for better statistics)
+        let mut seq_times = vec![0u128; ${SAMPLE_COUNT}];
+        for i in 0..${SAMPLE_COUNT} {
             let start = std::time::Instant::now();
             let result = sequential_sum(&tree);
             let end = start.elapsed();
@@ -357,11 +394,16 @@ fn main() {
             std::hint::black_box(result);
         }
         
-        // Parallel timing (multiple runs)
-        let mut par_times = vec![0u128; 10];
-        for i in 0..10 {
+        // Parallel timing (increased sample size) - FIXED: Proper scope usage
+        let mut par_times = vec![0u128; ${SAMPLE_COUNT}];
+        for i in 0..${SAMPLE_COUNT} {
             let start = std::time::Instant::now();
-            let result = chili_parallel_sum(&tree);
+            let result = if let Some(ref tree_node) = tree {
+                let mut scope = thread_pool.scope();
+                chili_parallel_sum(&mut scope, tree_node)
+            } else {
+                0
+            };
             let end = start.elapsed();
             par_times[i] = end.as_nanos();
             std::hint::black_box(result);
@@ -418,17 +460,19 @@ fi
 # Build Chili benchmark
 echo -e "${BLUE}Building Chili benchmark...${NC}"
 cd "$TEMP_DIR/chili"
-# First try to build the library
-if cargo build --release > /dev/null 2>&1; then
-    # Then try to build our benchmark binary
-    if rustc chili_tree_benchmark.rs -L target/release/deps --extern chili=target/release/libchili.rlib -O > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ Chili benchmark built successfully${NC}"
-        CHILI_BUILT=true
-    else
-        echo -e "${YELLOW}⚠️  Chili benchmark build failed (linking issues)${NC}"
-    fi
+# Add binary configuration to Cargo.toml only if not already present
+if ! grep -q "chili_tree_benchmark" Cargo.toml; then
+    echo "" >> Cargo.toml
+    echo "[[bin]]" >> Cargo.toml
+    echo "name = \"chili_tree_benchmark\"" >> Cargo.toml
+    echo "path = \"chili_tree_benchmark.rs\"" >> Cargo.toml
+fi
+# Build using cargo
+if cargo build --release --bin chili_tree_benchmark > /dev/null 2>&1; then
+    echo -e "${GREEN}✅ Chili benchmark built successfully${NC}"
+    CHILI_BUILT=true
 else
-    echo -e "${YELLOW}⚠️  Chili library build failed (API may have changed)${NC}"
+    echo -e "${YELLOW}⚠️  Chili benchmark build failed (linking issues)${NC}"
 fi
 
 echo -e "${GREEN}✅ Library builds completed${NC}"
@@ -443,13 +487,13 @@ cd "$REPO_ROOT"
 echo -e "\n${YELLOW}🏃 Running benchmarks...${NC}"
 
 # Initialize results file
-cat > "$RESULTS_FILE" << 'EOF'
+cat > "$RESULTS_FILE" << EOF
 BEAT.ZIG vs MULTI-LIBRARY COMPARISON RESULTS
 ============================================
 
 Test Pattern: Binary Tree Sum (Fork-Join Parallelism)
-Tree Sizes: 1,023 and 16,777,215 nodes  
-Methodology: Median of 10 runs with warmup
+${BENCHMARK_DESCRIPTION}
+${METHODOLOGY_DESCRIPTION}
 Libraries: Beat.zig, Spice (Zig), Chili (Rust)
 
 EOF
@@ -479,10 +523,10 @@ if [ "$SPICE_BUILT" = true ]; then
     echo "==============" >> "$RESULTS_FILE"
     
     cd "$TEMP_DIR/spice"
-    if ./spice_tree_benchmark >> "$RESULTS_FILE" 2>&1; then
+    if timeout 30s ./spice_tree_benchmark >> "$RESULTS_FILE" 2>&1; then
         echo -e "${GREEN}✅ Spice benchmark completed${NC}"
     else
-        echo -e "${RED}❌ Spice benchmark failed${NC}"
+        echo -e "${RED}❌ Spice benchmark failed or timed out${NC}"
     fi
     cd "$REPO_ROOT"
 fi
@@ -493,10 +537,10 @@ if [ "$CHILI_BUILT" = true ]; then
     echo "==============" >> "$RESULTS_FILE"
     
     cd "$TEMP_DIR/chili"
-    if ./chili_tree_benchmark >> "$RESULTS_FILE" 2>&1; then
+    if timeout 30s ./target/release/chili_tree_benchmark >> "$RESULTS_FILE" 2>&1; then
         echo -e "${GREEN}✅ Chili benchmark completed${NC}"
     else
-        echo -e "${RED}❌ Chili benchmark failed${NC}"
+        echo -e "${RED}❌ Chili benchmark failed or timed out${NC}"
     fi
     cd "$REPO_ROOT"
 fi

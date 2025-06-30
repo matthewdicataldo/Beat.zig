@@ -78,3 +78,4 @@ export fn ispc_free_vectorized_queue_state() callconv(.C) void {}
 export fn ispc_free_alignment_buffers() callconv(.C) void {}
 export fn ispc_free_batch_optimization_state() callconv(.C) void {}
 export fn ispc_free_similarity_matrix_cache() callconv(.C) void {}
+export fn ispc_verify_no_leaks() callconv(.C) bool { return true; } // No leaks in stub mode

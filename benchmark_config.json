@@ -1,0 +1,33 @@
+{
+  "benchmark": {
+    "name": "Multi-Library Parallelism Comparison",
+    "description": "Binary Tree Sum, Fibonacci, and Matrix Operations",
+    "tree_sizes": [1023, 65535],
+    "fibonacci_numbers": [35, 40, 42],
+    "matrix_sizes": [128, 256, 512],
+    "sample_count": 20,
+    "warmup_runs": 3,
+    "timeout_seconds": 30
+  },
+  "libraries": {
+    "beat_zig": {
+      "name": "Beat.zig",
+      "language": "Zig",
+      "features": ["work-stealing", "topology-aware", "SIMD", "memory-aware"]
+    },
+    "spice": {
+      "name": "Spice",
+      "language": "Zig", 
+      "features": ["heartbeat-scheduling", "sub-nanosecond-overhead"]
+    },
+    "chili": {
+      "name": "Chili",
+      "language": "Rust",
+      "features": ["heartbeat-scheduling", "low-overhead-fork-join"]
+    }
+  },
+  "output": {
+    "results_file": "multilibrary_comparison_results.txt",
+    "format": "markdown"
+  }
+}

@@ -254,9 +254,9 @@ pub fn createAdvancedPool(allocator: std.mem.Allocator, options: AdvancedOptions
 // Development and Testing Pools - Enhanced Debugging and Validation
 // ============================================================================
 
-/// Create a development pool with comprehensive debugging enabled
+/// Create a simple development pool with comprehensive debugging enabled
 /// Perfect for development, debugging, and testing applications
-pub fn createDevelopmentPool(allocator: std.mem.Allocator) !*core.ThreadPool {
+pub fn createSimpleDevelopmentPool(allocator: std.mem.Allocator) !*core.ThreadPool {
     const config = core.Config.createDevelopmentConfig();
     
     std.log.info(

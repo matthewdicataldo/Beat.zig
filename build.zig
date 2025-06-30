@@ -95,14 +95,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("beat.zig"),
     }));
 
-    // Add ISPC stub cleanup to provide missing cleanup functions
-    const ispc_stub_obj = b.addObject(.{
-        .name = "ispc_stub_cleanup",
-        .root_source_file = b.path("src/ispc_stub_cleanup.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    cross_library_benchmark.addObject(ispc_stub_obj);
+    // Note: ISPC stub cleanup will be provided by cross_lib_ispc_runtime_stubs
+    // to avoid duplicate symbol conflicts
 
     // Note: ISPC linking will be added later after ISPC objects are compiled
     b.installArtifact(cross_library_benchmark);
@@ -110,6 +104,61 @@ pub fn build(b: *std.Build) void {
     const run_cross_library_benchmark = b.addRunArtifact(cross_library_benchmark);
     const cross_lib_bench_step = b.step("bench-cross-library", "Run scientific cross-library performance comparison (vs Spice, Chili, Rayon)");
     cross_lib_bench_step.dependOn(&run_cross_library_benchmark.step);
+
+    // Matrix multiplication benchmarks for fair comparison
+    const std_thread_matrix_benchmark = b.addExecutable(.{
+        .name = "std_thread_matrix_benchmark",
+        .root_source_file = b.path("src/std_thread_matrix_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, std_thread_matrix_benchmark, auto_config);
+    b.installArtifact(std_thread_matrix_benchmark);
+    
+    const run_std_thread_matrix_benchmark = b.addRunArtifact(std_thread_matrix_benchmark);
+    const std_thread_matrix_bench_step = b.step("bench-std-thread-matrix", "Run std.Thread matrix multiplication benchmark");
+    std_thread_matrix_bench_step.dependOn(&run_std_thread_matrix_benchmark.step);
+
+    const beat_matrix_benchmark = b.addExecutable(.{
+        .name = "beat_matrix_benchmark",
+        .root_source_file = b.path("src/beat_matrix_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, beat_matrix_benchmark, auto_config);
+    beat_matrix_benchmark.root_module.addImport("beat", zigpulse_module);
+    b.installArtifact(beat_matrix_benchmark);
+    
+    const run_beat_matrix_benchmark = b.addRunArtifact(beat_matrix_benchmark);
+    const beat_matrix_bench_step = b.step("bench-beat-matrix", "Run Beat.zig matrix multiplication benchmark");
+    beat_matrix_bench_step.dependOn(&run_beat_matrix_benchmark.step);
+
+    const beat_fibonacci_benchmark = b.addExecutable(.{
+        .name = "beat_fibonacci_benchmark",
+        .root_source_file = b.path("src/beat_fibonacci_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, beat_fibonacci_benchmark, auto_config);
+    beat_fibonacci_benchmark.root_module.addImport("beat", zigpulse_module);
+    b.installArtifact(beat_fibonacci_benchmark);
+    
+    const run_beat_fibonacci_benchmark = b.addRunArtifact(beat_fibonacci_benchmark);
+    const beat_fibonacci_bench_step = b.step("bench-beat-fibonacci", "Run Beat.zig Fibonacci benchmark");
+    beat_fibonacci_bench_step.dependOn(&run_beat_fibonacci_benchmark.step);
+
+    const std_thread_fibonacci_benchmark = b.addExecutable(.{
+        .name = "std_thread_fibonacci_benchmark",
+        .root_source_file = b.path("src/std_thread_fibonacci_benchmark.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+    build_config.addBuildOptions(b, std_thread_fibonacci_benchmark, auto_config);
+    b.installArtifact(std_thread_fibonacci_benchmark);
+    
+    const run_std_thread_fibonacci_benchmark = b.addRunArtifact(std_thread_fibonacci_benchmark);
+    const std_thread_fibonacci_bench_step = b.step("bench-std-thread-fibonacci", "Run std.Thread Fibonacci benchmark");
+    std_thread_fibonacci_bench_step.dependOn(&run_std_thread_fibonacci_benchmark.step);
 
     // Simple Spice comparison benchmark (standalone)
     const simple_spice_benchmark = b.addExecutable(.{
@@ -124,6 +173,21 @@ pub fn build(b: *std.Build) void {
     const run_simple_spice_benchmark = b.addRunArtifact(simple_spice_benchmark);
     const simple_spice_bench_step = b.step("bench-spice-simple", "Run simple threading vs Beat.zig infrastructure comparison");
     simple_spice_bench_step.dependOn(&run_simple_spice_benchmark.step);
+
+    // Native benchmark runner (Zig-only, no bash dependencies)
+    const benchmark_runner = b.addExecutable(.{
+        .name = "benchmark_runner",
+        .root_source_file = b.path("src/benchmark_runner.zig"),
+        .target = target,
+        .optimize = .ReleaseFast,
+    });
+
+    b.installArtifact(benchmark_runner);
+
+    const run_benchmark_runner = b.addRunArtifact(benchmark_runner);
+    const native_bench_step = b.step("bench-native", "Run native Zig benchmark suite (std.Thread baseline)");
+    native_bench_step.dependOn(&run_benchmark_runner.step);
+
 
     // Beat.zig tree benchmark for external comparison
     const beat_tree_benchmark = b.addExecutable(.{
@@ -147,6 +211,19 @@ pub fn build(b: *std.Build) void {
     // Legacy alias for backwards compatibility
     const spice_external_step = b.step("bench-spice-external", "Alias for bench-multilibrary-external (legacy compatibility)");
     spice_external_step.dependOn(&multilibrary_external_cmd.step);
+
+    // Unified multi-library benchmark (all-in-one Zig solution)
+    const unified_multilibrary_exe = b.addExecutable(.{
+        .name = "unified_multilibrary_benchmark",
+        .root_source_file = b.path("src/unified_multilibrary_benchmark.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    
+    // Add ISPC linking (will be configured later when ispc_obj_paths is available)
+    const run_unified_multilibrary = b.addRunArtifact(unified_multilibrary_exe);
+    const unified_multilibrary_step = b.step("bench-unified-multilibrary", "🚀 Unified Multi-Library Benchmark: All libraries in single Zig program");
+    unified_multilibrary_step.dependOn(&run_unified_multilibrary.step);
 
     // Examples
     const example_exe = b.addExecutable(.{
@@ -1321,6 +1398,50 @@ pub fn build(b: *std.Build) void {
             .optimize = .ReleaseFast,
         });
         benchmark_exe.addObject(benchmark_runtime_stubs);
+        
+        // Link ISPC objects to unified multi-library benchmark  
+        for (ispc_obj_paths.items) |obj_path| {
+            unified_multilibrary_exe.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        unified_multilibrary_exe.addIncludePath(b.path("zig-cache/ispc"));
+        for (ispc_steps.items) |ispc_step| {
+            unified_multilibrary_exe.step.dependOn(ispc_step);
+        }
+        
+        // Add ISPC runtime stubs to unified benchmark (basic ISPC functions)
+        const unified_runtime_stubs = b.addObject(.{
+            .name = "unified_ispc_runtime_stubs",
+            .root_source_file = b.path("src/ispc_runtime_stubs.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        unified_multilibrary_exe.addObject(unified_runtime_stubs);
+        
+        // Link ISPC objects to matrix and fibonacci benchmarks for SIMD acceleration
+        for (ispc_obj_paths.items) |obj_path| {
+            beat_matrix_benchmark.addObjectFile(.{ .cwd_relative = obj_path });
+            std_thread_matrix_benchmark.addObjectFile(.{ .cwd_relative = obj_path });
+            beat_fibonacci_benchmark.addObjectFile(.{ .cwd_relative = obj_path });
+        }
+        beat_matrix_benchmark.addIncludePath(b.path("zig-cache/ispc"));
+        std_thread_matrix_benchmark.addIncludePath(b.path("zig-cache/ispc"));
+        beat_fibonacci_benchmark.addIncludePath(b.path("zig-cache/ispc"));
+        for (ispc_steps.items) |ispc_step| {
+            beat_matrix_benchmark.step.dependOn(ispc_step);
+            std_thread_matrix_benchmark.step.dependOn(ispc_step);
+            beat_fibonacci_benchmark.step.dependOn(ispc_step);
+        }
+        
+        // Add ISPC runtime stubs to matrix and fibonacci benchmarks
+        const matrix_runtime_stubs = b.addObject(.{
+            .name = "matrix_ispc_runtime_stubs",
+            .root_source_file = b.path("src/ispc_runtime_stubs.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        });
+        beat_matrix_benchmark.addObject(matrix_runtime_stubs);
+        std_thread_matrix_benchmark.addObject(matrix_runtime_stubs);
+        beat_fibonacci_benchmark.addObject(matrix_runtime_stubs);
     }
 
     // Minotaur SIMD superoptimization tests
