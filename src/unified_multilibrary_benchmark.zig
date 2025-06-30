@@ -3,8 +3,8 @@
 // Eliminates bash script complexity while maintaining external library support
 
 const std = @import("std");
-const beat = @import("easy_api.zig");
-const core = @import("core.zig");
+const beat = @import("core.zig");
+const easy_api = @import("easy_api.zig");
 
 const BenchmarkConfig = struct {
     benchmark: struct {
@@ -101,7 +101,6 @@ fn stdThreadSumBounded(allocator: std.mem.Allocator, node: ?*Node, max_depth: u3
                 .allocator = allocator,
             };
             const left_thread = try std.Thread.spawn(.{}, stdThreadWorker, .{left_task, max_depth - 1});
-            defer left_thread.join();
             
             if (n.right) |right_child| {
                 right_result = try stdThreadSumBounded(allocator, right_child, max_depth - 1);
@@ -131,7 +130,7 @@ const BeatSumTask = struct {
     result: i64 = 0,
 };
 
-fn beatParallelSum(pool: *core.ThreadPool, allocator: std.mem.Allocator, node: ?*Node) !i64 {
+fn beatParallelSum(pool: *beat.ThreadPool, allocator: std.mem.Allocator, node: ?*Node) !i64 {
     if (node) |n| {
         // For small subtrees, go sequential to avoid overhead
         if (countNodes(n) < 100) {
@@ -140,21 +139,21 @@ fn beatParallelSum(pool: *core.ThreadPool, allocator: std.mem.Allocator, node: ?
         
         var result = n.value;
         
-        // Create tasks for left and right subtrees
+        // Create tasks using main allocator to avoid lifetime issues
         const left_task = try allocator.create(BeatSumTask);
-        defer allocator.destroy(left_task);
         const right_task = try allocator.create(BeatSumTask);
+        defer allocator.destroy(left_task);
         defer allocator.destroy(right_task);
         
         left_task.* = BeatSumTask{ .node = n.left };
         right_task.* = BeatSumTask{ .node = n.right };
         
         // Submit tasks to thread pool
-        const left_beat_task = core.Task{
+        const left_beat_task = beat.Task{
             .func = beatSumTaskWrapper,
             .data = @ptrCast(left_task),
         };
-        const right_beat_task = core.Task{
+        const right_beat_task = beat.Task{
             .func = beatSumTaskWrapper,
             .data = @ptrCast(right_task),
         };
@@ -266,7 +265,9 @@ fn runExternalLibrary(allocator: std.mem.Allocator, library_name: []const u8, tr
 }
 
 fn timeoutKill(child: *std.process.Child, timeout_ms: u32) void {
-    std.time.sleep(timeout_ms * 1_000_000); // Convert to nanoseconds
+    // Convert to nanoseconds safely, avoiding overflow
+    const timeout_ns: u64 = @as(u64, timeout_ms) * 1_000_000;
+    std.time.sleep(timeout_ns);
     _ = child.kill() catch {};
 }
 
@@ -418,19 +419,19 @@ fn runStdThreadBaseline(allocator: std.mem.Allocator, size: u32, sample_count: u
 }
 
 fn runBeatZigBenchmark(allocator: std.mem.Allocator, size: u32, sample_count: u32, warmup_runs: u32) !LibraryResult {
+    // Create Beat.zig basic pool (ISPC-enabled by default)
+    const pool = try easy_api.createBasicPool(allocator, 4);
+    defer pool.deinit();
+    
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const arena_allocator = arena.allocator();
     
     const tree = try createTree(arena_allocator, size);
     
-    // Create Beat.zig basic pool (ISPC-enabled by default)
-    const pool = try beat.createBasicPool(allocator, 4);
-    defer pool.deinit();
-    
     // Warmup
     for (0..warmup_runs) |_| {
-        _ = try beatParallelSum(pool, allocator, tree);
+        _ = try beatParallelSum(pool, arena_allocator, tree);
     }
     
     // Timing
@@ -440,7 +441,7 @@ fn runBeatZigBenchmark(allocator: std.mem.Allocator, size: u32, sample_count: u3
     for (times, 0..) |*time, i| {
         _ = i;
         const start = std.time.nanoTimestamp();
-        const result = try beatParallelSum(pool, allocator, tree);
+        const result = try beatParallelSum(pool, arena_allocator, tree);
         const end = std.time.nanoTimestamp();
         time.* = @intCast(end - start);
         std.mem.doNotOptimizeAway(result);

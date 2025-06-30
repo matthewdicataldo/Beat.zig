@@ -1,0 +1,238 @@
+info: ISPC detected: Enabling optimized SIMD kernels.
+src/kernels/prediction_pipeline.ispc:66:9: Performance Warning: Scatter 
+        required to store value. 
+        confidence_results[i] = result;  // Single struct write instead of 5 separate writes
+        ^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/prediction_pipeline.ispc:139:30: Performance Warning: Gather 
+        required to load value. 
+        OneEuroState state = states[i];
+                             ^^^^^^^^^
+
+src/kernels/prediction_pipeline.ispc:179:9: Performance Warning: Scatter 
+        required to store value. 
+        states[i] = state;
+        ^^^^^^^^^
+
+src/kernels/prediction_pipeline.ispc:213:20: Performance Warning: Gather 
+        required to load value. 
+        bool hit = cache_hits[cache_idx];
+                   ^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/prediction_pipeline.ispc:215:29: Performance Warning: Gather 
+        required to load value. 
+        float cached_pred = cached_predictions[cache_idx];
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/prediction_pipeline.ispc:216:29: Performance Warning: Gather 
+        required to load value. 
+        float cached_conf = confidence_scores[cache_idx];
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/prediction_pipeline.ispc:300:9: Performance Warning: Scatter 
+        required to store value. 
+        work_estimates[i] = estimate;  // Single struct write instead of 4 separate writes
+        ^^^^^^^^^^^^^^^^^
+
+src/kernels/prediction_pipeline.ispc:366:9: Performance Warning: Scatter 
+        required to store value. 
+        scheduling_decisions[task_id] = decision;  // Single struct write instead of 4 separate writes
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/one_euro_filter.ispc:33:30: Performance Warning: Gather required 
+        to load value. 
+        OneEuroState state = states[i];
+                             ^^^^^^^^^
+
+src/kernels/one_euro_filter.ispc:70:9: Performance Warning: Scatter required 
+        to store value. 
+        states[i] = state;
+        ^^^^^^^^^
+
+src/kernels/one_euro_filter.ispc:42:13: Performance Warning: Scatter required 
+        to store value. 
+            states[i] = state;
+            ^^^^^^^^^
+
+src/kernels/one_euro_filter.ispc:182:30: Performance Warning: Gather required 
+        to load value. 
+        OneEuroState state = states[i];
+                             ^^^^^^^^^
+
+src/kernels/one_euro_filter.ispc:202:9: Performance Warning: Scatter required 
+        to store value. 
+        states[i] = state;
+        ^^^^^^^^^
+
+src/kernels/heartbeat_scheduling.ispc:168:33: Performance Warning: Gather 
+        required to load value. 
+        float base_adaptation = adaptation_rates[pressure_level];
+                                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/advanced_ispc_research.ispc:82:13: Performance Warning: Scatter 
+        required to store value. 
+            redistribution_matrix[worker_id * worker_count + other_worker] = redistribution;
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/advanced_ispc_research.ispc:150:35: Performance Warning: Gather 
+        required to load value. 
+            float current_state = worker_states[state_idx];
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/advanced_ispc_research.ispc:154:13: Performance Warning: Scatter 
+        required to store value. 
+            result_buffer[state_idx] = new_state;
+            ^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/advanced_ispc_research.ispc:218:17: Performance Warning: Scatter 
+        required to store value. 
+                communication_matrix[worker_id * worker_count + target_worker] = 
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/optimized_batch_kernels.ispc:137:22: Performance Warning: Gather 
+        required to load value. 
+        float load = worker_loads[worker_idx];
+                     ^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/optimized_batch_kernels.ispc:138:27: Performance Warning: Gather 
+        required to load value. 
+        float numa_dist = numa_distances[worker_idx];
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/optimized_batch_kernels.ispc:196:25: Performance Warning: Scatter 
+        required to store value. 
+                        similarity_matrix[i * count + j] = row_results[local_j];
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/fingerprint_similarity.ispc:15:27: Performance Warning: Gather 
+        required to load value. 
+        uint64 fp_a_low = fingerprints_a[i * 2];
+                          ^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/fingerprint_similarity.ispc:16:28: Performance Warning: Gather 
+        required to load value. 
+        uint64 fp_a_high = fingerprints_a[i * 2 + 1];
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/fingerprint_similarity.ispc:17:27: Performance Warning: Gather 
+        required to load value. 
+        uint64 fp_b_low = fingerprints_b[i * 2];
+                          ^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/fingerprint_similarity.ispc:18:28: Performance Warning: Gather 
+        required to load value. 
+        uint64 fp_b_high = fingerprints_b[i * 2 + 1];
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/fingerprint_similarity.ispc:74:25: Performance Warning: Gather 
+        required to load value. 
+        uint64 fp_low = fingerprints[i * 2];
+                        ^^^^^^^^^^^^^^^^^^^
+
+src/kernels/fingerprint_similarity.ispc:75:26: Performance Warning: Gather 
+        required to load value. 
+        uint64 fp_high = fingerprints[i * 2 + 1];
+                         ^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/worker_selection.ispc:165:27: Performance Warning: Gather required 
+        to load value. 
+            total_time += task_completion_times[base_idx + i];
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/worker_selection.ispc:166:35: Performance Warning: Gather required 
+        to load value. 
+            total_cache_misses += cache_miss_counts[base_idx + i];
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+src/kernels/worker_selection.ispc:167:39: Performance Warning: Gather required 
+        to load value. 
+            total_context_switches += context_switch_counts[base_idx + i];
+                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+🚀 UNIFIED MULTI-LIBRARY BENCHMARK
+=====================================
+Beat.zig vs External Libraries Comparison
+
+🔧 Benchmarking tree size: 1023 nodes...
+info: 🔍 Beat.zig Configuration Analysis:
+info:   ⚠️  Missing build_config module - recommend using Easy API
+info:   💡 See enhanced error messages above for solutions
+info: 
+ℹ️  Beat.zig detected as external dependency
+💡 Consider using the Easy API for simpler integration:
+   const pool = try beat.createBasicPool(allocator, 4);
+📚 See: https://github.com/Beat-zig/Beat.zig/blob/main/INTEGRATION_GUIDE.md
+
+info: Souper mathematical optimizations initialized
+info: Available optimizations:
+info:   - Fingerprint similarity computation
+info:   - Heartbeat scheduling decisions
+info:   - Lock-free index calculations
+info:   - SIMD task classification
+info:   - Mathematical utility functions
+info: 🔬 Souper mathematical optimizations enabled - formally verified performance
+info: 🚀 SIMD-enhanced continuation processing enabled - 6-23x performance improvement
+info: Starting comprehensive ISPC runtime cleanup...
+debug: Cleaning up ISPC prediction system...
+debug: ISPC prediction acceleration state cleanup skipped (not available)
+debug: ISPC prediction integration cleanup completed
+debug: Cleaning up ISPC SIMD system...
+debug: Cleaning up ISPC batch system...
+debug: Cleaning up ISPC core runtime...
+debug: ISPC runtime not available, skipping cleanup
+debug: Performing final ISPC cleanup...
+debug: ISPC cleanup verification passed - no leaks detected
+info: ISPC runtime cleanup completed successfully
+🔧 Benchmarking tree size: 65535 nodes...
+info: 🔍 Beat.zig Configuration Analysis:
+info:   ⚠️  Missing build_config module - recommend using Easy API
+info:   💡 See enhanced error messages above for solutions
+info: 
+ℹ️  Beat.zig detected as external dependency
+💡 Consider using the Easy API for simpler integration:
+   const pool = try beat.createBasicPool(allocator, 4);
+📚 See: https://github.com/Beat-zig/Beat.zig/blob/main/INTEGRATION_GUIDE.md
+
+info: Souper mathematical optimizations initialized
+info: Available optimizations:
+info:   - Fingerprint similarity computation
+info:   - Heartbeat scheduling decisions
+info:   - Lock-free index calculations
+info:   - SIMD task classification
+info:   - Mathematical utility functions
+info: 🔬 Souper mathematical optimizations enabled - formally verified performance
+info: 🚀 SIMD-enhanced continuation processing enabled - 6-23x performance improvement
+info: Starting comprehensive ISPC runtime cleanup...
+debug: Cleaning up ISPC prediction system...
+debug: ISPC prediction acceleration state cleanup skipped (not available)
+debug: ISPC prediction integration cleanup completed
+debug: Cleaning up ISPC SIMD system...
+debug: Cleaning up ISPC batch system...
+debug: Cleaning up ISPC core runtime...
+debug: ISPC runtime not available, skipping cleanup
+debug: Performing final ISPC cleanup...
+debug: ISPC cleanup verification passed - no leaks detected
+info: ISPC runtime cleanup completed successfully
+
+📊 UNIFIED BENCHMARK RESULTS
+=============================
+| Library      | Language | Tree Size  | Seq (μs) | Par (μs) | Speedup  | Status     |
+|--------------|----------|------------|----------|----------|----------|------------|
+| Sequential   | Zig      | 1023       | 4        | 4        | 1.00     | ✅          |
+| std.Thread   | Zig      | 1023       | 4        | 880      | 0.00     | ✅          |
+| Beat.zig     | Zig      | 1023       | 4        | 15       | 0.27     | ✅          |
+| Spice        | Zig      | 1023       | N/A      | N/A      | N/A      | ❌          |
+| Chili        | Rust     | 1023       | N/A      | N/A      | N/A      | ❌          |
+| Sequential   | Zig      | 65535      | 244      | 244      | 1.00     | ✅          |
+| std.Thread   | Zig      | 65535      | 244      | 879      | 0.28     | ✅          |
+| Beat.zig     | Zig      | 65535      | 244      | 693      | 0.35     | ✅          |
+| Spice        | Zig      | 65535      | N/A      | N/A      | N/A      | ❌          |
+| Chili        | Rust     | 65535      | N/A      | N/A      | N/A      | ❌          |
+
+🎯 KEY INSIGHTS:
+• Beat.zig: ISPC-accelerated with 6-23x SIMD potential + work-stealing
+• Sequential: Single-threaded baseline reference
+• std.Thread: Raw threading overhead baseline
+• External libraries: Spice (heartbeat) + Chili (work-stealing)
+
+🚀 Unified benchmark complete! All libraries tested with identical methodology.
